@@ -375,6 +375,8 @@ struct domain *domain_create(domid_t domid,
         old_hwdom = hardware_domain;
         hardware_domain = d;
     }
+    else if ( domid == DOMID_BOOT_DOMAIN )
+        d->disable_migrate = true;
 
     TRACE_1D(TRC_DOM0_DOM_ADD, d->domain_id);
 

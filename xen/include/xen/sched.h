@@ -544,7 +544,8 @@ extern struct vcpu *idle_vcpu[NR_CPUS];
 
 static inline bool is_system_domain(const struct domain *d)
 {
-    return d->domain_id >= DOMID_FIRST_RESERVED;
+    return (d->domain_id >= DOMID_FIRST_RESERVED) &&
+           (d->domain_id != DOMID_BOOT_DOMAIN);
 }
 
 #define DOMAIN_DESTROYED (1u << 31) /* assumes atomic_t is >= 32 bits */
