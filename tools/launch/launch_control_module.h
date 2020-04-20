@@ -94,5 +94,6 @@ struct lcm_module {
 /* File format */
 struct lcm_header_info {
     uint32_t magic_number;
+#define LCM_HEADER_MAGIC_NUMBER 0x4d434c78 /* xLCM */
     struct lcm_module modules[0];
 };
