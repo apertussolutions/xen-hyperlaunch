@@ -126,13 +126,34 @@ int read_and_parse_input_file(const char *filename,
 
 int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 {
-    unsigned int out_size, written;
-    unsigned char out_buffer[4096]; /* TODO */
+/******* TODO: START WORK IN PROGRESS SECTION ************/
+    struct lcm_header_info *header_info;
+    struct lcm_module *module;
+    char *domain_config = "{ \"one_potato\": \"medium_hot\" }";
+    unsigned int out_size, written, domain_config_len;
+    unsigned char out_buffer[4096]; /* TODO: dynamic allocation */
 
     /* TODO: */
     strcpy((char *)out_buffer, "Roger that, Alpha Papa: Ten Four!\n");
     out_size = strlen((char *)out_buffer);
 
+    header_info = (struct lcm_header_info *)&out_buffer;
+    memset(header_info, 0, sizeof(struct lcm_header_info));
+
+    header_info->magic_number = LCM_HEADER_MAGIC_NUMBER;
+
+    module = &header_info->modules[0];
+    /* TODO: Loop writing the module output */
+
+    domain_config_len = strlen(domain_config) + 1; /* +1 for null term */
+
+    module->type = LCM_MODULE_DOMAIN_KERNEL;
+    module->len = sizeof(struct lcm_module) +
+                  sizeof(struct lcm_kernel) +
+                  domain_config_len;
+
+
+/******* TODO: END WORK IN PROGRESS SECTION ************/
     written = fwrite(out_buffer, 1, out_size, file_stream);
     if ( written < out_size )
     {
