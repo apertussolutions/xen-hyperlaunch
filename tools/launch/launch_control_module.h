@@ -5,19 +5,27 @@
  */
 
 /*
- * Basic domain configuration data pertaining to a domain kernel,
+ * Basic domain configuration data pertaining to a domain,
  * parsed by the hypervisor for performing initial domain construction.
  */
 struct lcm_domain_basic_config {
-    /* Fixed size and offset fields are mandatory in this structure */
+    /*
+     * Fixed size and offset fields are mandatory in this structure
+     * and alignment of fields to 4-bytes is required.
+     */
+    uint32_t permissions;
+#define LCM_DOMAIN_PERMISSION_PRIVILEGED    (1 << 0)
+#define LCM_DOMAIN_PERMISSION_HARDWARE      (1 << 1)
 
-    uint8_t privileged:1, hardware:1;
+    uint32_t functions;
+#define LCM_DOMAIN_FUNCTION_BOOT            (1 << 0)
+#define LCM_DOMAIN_FUNCTION_CONSOLE         (1 << 1)
 
-    uint8_t boot:1, console:1;
+    uint32_t mode;
+#define LCM_DOMAIN_MODE_PARAVIRTUALIZED     (1 << 0) /* PV | PVH/HVM */
+#define LCM_DOMAIN_MODE_ENABLE_DEVICE_MODEL (1 << 1) /* PVH | HVM */
 
-    uint8_t /* reserved bits! */ :2, mode :2;
-
-    /* xen_domain_handle_t : see handle field in domain struct */
+    /* xen_domain_handle_t : see handle field in struct domain */
     uint8_t domain_handle[16];
 
     /* Domain size in bytes */
@@ -25,6 +33,20 @@ struct lcm_domain_basic_config {
 
     /* XSM/Flask sid */
     uint32_t domain_sid;
+};
+
+/*
+ * Basic domain configuration data pertaining to a highly-privileged domain,
+ * parsed by the hypervisor for performing initial domain construction.
+ * This supports construction of a classic dom0 domain.
+ */
+struct lcm_domain_high_priv_config {
+    /*
+     * Fixed size and offset fields are mandatory in this structure
+     * and alignment of fields to 4-bytes is required.
+     */
+    uint32_t mode;
+#define LCM_DOMAIN_HIGH_PRIV_MODE_PARAVIRTUALIZED  (1 << 0) /* PV | PVH/HVM */
 };
 
 /*
@@ -67,10 +89,11 @@ struct lcm_module {
 #define LCM_MODULE_IGNORE                   0 /* Skip this data */
 #define LCM_MODULE_LAUNCH_CONTROL_MODULE    1
 #define LCM_MODULE_DOMAIN_BASIC_CONFIG      2
-#define LCM_MODULE_DOMAIN_EXTENDED_CONFIG   3
-#define LCM_MODULE_DOMAIN_RAMDISK           4
-#define LCM_MODULE_CPU_MICROCODE            5
-#define LCM_MODULE_XSM_FLASK_POLICY         6
+#define LCM_MODULE_DOMAIN_HIGH_PRIV_CONFIG  3
+#define LCM_MODULE_DOMAIN_EXTENDED_CONFIG   4
+#define LCM_MODULE_DOMAIN_RAMDISK           5
+#define LCM_MODULE_CPU_MICROCODE            6
+#define LCM_MODULE_XSM_FLASK_POLICY         7
 
     /* Length of this lcm_module struct including the subtype union */
     uint32_t len;
