@@ -6,10 +6,12 @@
  * Copyright (c) 2020, Star Lab Corporation
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -29,7 +31,8 @@
 
 void show_help(const char *cmdname)
 {
-    printf("%s <launch definition file>\n", cmdname);
+    printf("%s <in: launch definition file> <out: launch control module>\n",
+           cmdname);
 }
 
 int read_file_size(const char *filename, unsigned int max_bytes,
@@ -96,6 +99,13 @@ int read_and_parse_input_file(const char *filename,
         return 1;
     }
 
+    if ( fclose(file_stream) )
+    {
+        fprintf(stderr, "Error closing the input file stream: %d\n",
+                errno);
+        return 1;
+    }
+
     debug("Entering parser\n");
 
     /* Reserving the last character of errbuf for the null terminator */
@@ -114,21 +124,81 @@ int read_and_parse_input_file(const char *filename,
 	return 0;
 }
 
+int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
+{
+    unsigned int out_size, written;
+    unsigned char out_buffer[4096]; /* TODO */
+
+    /* TODO: */
+    strcpy((char *)out_buffer, "Roger that, Alpha Papa: Ten Four!\n");
+    out_size = strlen((char *)out_buffer);
+
+    written = fwrite(out_buffer, 1, out_size, file_stream);
+    if ( written < out_size )
+    {
+        fprintf(stderr, "Error writing out the launch control module\n");
+        return 1;
+    }
+    debug("Wrote: %u bytes\n", written);
+
+    return 0;
+}
+
+int generate_output(yajl_val config_node, const char *filename)
+{
+    FILE *file_stream;
+    struct stat statbuf;
+    int ret = 0;
+
+    /* Safety catch: don't overwrite files */
+    if ( !stat(filename, &statbuf) )
+    {
+        fprintf(stderr, "Error: file %s exists\n", filename);
+        return 1;
+    }
+
+    file_stream = fopen(filename, "w");
+    if ( !file_stream )
+    {
+        fprintf(stderr, "Error: could not open file %s for writing\n",
+                filename);
+        return 1;
+    }
+    /* Errors after this point need to clean up the output file */
+
+    ret = generate_launch_control_module(config_node, file_stream);
+
+    if ( fclose(file_stream) )
+    {
+        fprintf(stderr, "Error closing the output file stream: %d\n",
+                errno);
+        if ( !ret )
+            ret = 1;
+    }
+
+    if ( ret && unlink(filename) )
+        fprintf(stderr, "Error %d removing the incomplete output file: %s\n",
+                errno, filename);
+
+    return ret;
+}
+
 int main(int argc, char **argv)
 {
-    const char *filename;
+    const char *input_filename, *output_filename;
     unsigned char *file_buffer;
     unsigned int file_size, buffer_size;
     yajl_val config_node;
 
-    if ( argc != 2 )
+    if ( argc != 3 )
     {
         show_help(argv[0]);
         return 1;
     }
-    filename = argv[1];
+    input_filename = argv[1];
+    output_filename = argv[2];
 
-    if ( read_file_size(filename, MAX_INPUT_FILE_SIZE, &file_size) )
+    if ( read_file_size(input_filename, MAX_INPUT_FILE_SIZE, &file_size) )
         return 2;
 
     buffer_size = file_size + 1; /* Add one for a null terminator */
@@ -137,19 +207,23 @@ int main(int argc, char **argv)
     if ( !file_buffer )
     {
         fprintf(stderr, "Couldn't allocate memory to read entire file: %s\n",
-                filename);
+                input_filename);
         return 2;
     }
     memset(file_buffer, 0, buffer_size);
 
-    if ( read_and_parse_input_file(filename, file_buffer, buffer_size,
+    if ( read_and_parse_input_file(input_filename, file_buffer, buffer_size,
                                    &config_node) )
     {
-        fprintf(stderr, "Couldn't parse file: %s\n", filename);
+        fprintf(stderr, "Couldn't parse file: %s\n", input_filename);
         return 2;
     }
 
-    /* TODO: read the nodes and generate the LCM */
+    if ( generate_output(config_node, output_filename) )
+    {
+        fprintf(stderr, "Couldn't generate launch control module output\n");
+        return 3;
+    }
 
     yajl_tree_free(config_node);
     free(file_buffer);
