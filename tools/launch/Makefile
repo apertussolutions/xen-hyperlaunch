@@ -10,12 +10,13 @@ PROGS += lcm-tool
 endif
 
 LCM_TOOL_OBJS = lcm-tool.o
+LCM_TOOL_LIBS = -lyajl
 
 .PHONY: all
 all: $(PROGS)
 
 lcm-tool: $(LCM_TOOL_OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(LCM_TOOL_OBJS) $(APPEND_LDFLAGS)
+	$(CC) $(LDFLAGS) -o $@ $(LCM_TOOL_OBJS) $(LCM_TOOL_LIBS) $(APPEND_LDFLAGS)
 
 .PHONY: install
 install: all
