@@ -17,7 +17,7 @@
 
 #include <yajl/yajl_tree.h>
 
-#include "launch-control-module.h"
+#include "launch_control_module.h"
 
 #define MAX_INPUT_FILE_SIZE (1024 * 64) /* in bytes */
 
