@@ -147,9 +147,13 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     domain_config_len = strlen(domain_config) + 1; /* +1 for null term */
 
-    module->type = LCM_MODULE_DOMAIN_KERNEL;
+    module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
     module->len = sizeof(struct lcm_module) +
-                  sizeof(struct lcm_kernel) +
+                  sizeof(struct lcm_domain_basic_config);
+
+    module->type = LCM_MODULE_DOMAIN_EXTENDED_CONFIG;
+    module->len = sizeof(struct lcm_module) +
+                  sizeof(struct lcm_domain_extended_config) +
                   domain_config_len;
 
 

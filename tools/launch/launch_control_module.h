@@ -4,40 +4,39 @@
  * Copyright (c) 2020, Star Lab Corporation
  */
 
-/* Module data pertaining to a domain kernel */
-struct lcm_kernel {
+/*
+ * Basic domain configuration data pertaining to a domain kernel,
+ * parsed by the hypervisor for performing initial domain construction.
+ */
+struct lcm_domain_basic_config {
+    /* Fixed size and offset fields are mandatory in this structure */
 
+    uint8_t privileged:1, hardware:1;
+
+    uint8_t boot:1, console:1;
+
+    uint8_t /* reserved bits! */ :2, mode :2;
+
+    /* xen_domain_handle_t : see handle field in domain struct */
+    uint8_t domain_handle[16];
+
+    /* Domain size in bytes */
+    uint64_t mem_size;
+
+    /* XSM/Flask sid */
+    uint32_t domain_sid;
+};
+
+/*
+ * The extended domain configuration data is not parsed by the hypervisor.
+ * It is provided to the boot domain to apply the configuration.
+ */
+struct lcm_domain_extended_config {
     /*
-     * The basic domain configuration is parsed by the hypervisor for
-     * performing initial domain construction.
-     * Fixed size and offset fields are mandatory here.
+     * The length of this string is determined by the len field of the
+     * lcm_module struct, minus all fixed-length fields in lcm_module.
      */
-    struct {
-
-        uint8_t privileged:1, hardware:1;
-
-        uint8_t boot:1, console:1;
-
-        uint8_t /* reserved bits! */ :2, mode :2;
-
-        uint8_t domain_handle[16]; /* xen_domain_handle_t *handle */
-
-        /* Domain size in bytes */
-        uint64_t mem_size;
-
-        /* XSM/Flask sid */
-        uint32_t domain_sid;
-    } basic_config;
-
-    /*
-     * The extended domain configuration data is not parsed by the hypervisor
-     * and is provided to DomB to apply the domain configuration.
-     *
-     * The length of this string is determined by the len field of
-     * the lcm_module struct, minus the fixed-length fields in lcm_module
-     * and lcm_kernel.
-     */
-    char *extended_config[0];
+    char *config_string[0];
 };
 
 /* Module data pertaining to a domain ramdisk */
@@ -63,14 +62,15 @@ struct lcm_xsm_flask_policy {
 };
 
 struct lcm_module {
-    /* Type of this multiboot module */
+    /* Type of data in this struct describing a multiboot module */
     uint16_t type;
-#define LCM_MODULE_IGNORE                   0 /* Skip this module */
+#define LCM_MODULE_IGNORE                   0 /* Skip this data */
 #define LCM_MODULE_LAUNCH_CONTROL_MODULE    1
-#define LCM_MODULE_DOMAIN_KERNEL            2
-#define LCM_MODULE_DOMAIN_RAMDISK           3
-#define LCM_MODULE_CPU_MICROCODE            4
-#define LCM_MODULE_XSM_FLASK_POLICY         5
+#define LCM_MODULE_DOMAIN_BASIC_CONFIG      2
+#define LCM_MODULE_DOMAIN_EXTENDED_CONFIG   3
+#define LCM_MODULE_DOMAIN_RAMDISK           4
+#define LCM_MODULE_CPU_MICROCODE            5
+#define LCM_MODULE_XSM_FLASK_POLICY         6
 
     /* Length of this lcm_module struct including the subtype union */
     uint32_t len;
@@ -84,7 +84,8 @@ struct lcm_module {
     /* Module-type-specific module data */
     union {
         uint8_t raw[0];
-        struct lcm_kernel kernel[0];
+        struct lcm_domain_basic_config basic_config[0];
+        struct lcm_domain_extended_config extended_config[0];
         struct lcm_ramdisk ramdisk[0];
         struct lcm_microcode microcode[0];
         struct lcm_xsm_flask_policy xsm_flask_policy[0];
