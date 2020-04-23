@@ -107,11 +107,12 @@ struct lcm_module {
     /* Module-type-specific module data */
     union {
         uint8_t raw[0];
-        struct lcm_domain_basic_config basic_config[0];
-        struct lcm_domain_extended_config extended_config[0];
-        struct lcm_ramdisk ramdisk[0];
-        struct lcm_microcode microcode[0];
-        struct lcm_xsm_flask_policy xsm_flask_policy[0];
+        struct lcm_domain_basic_config basic_config;
+        struct lcm_domain_high_priv_config high_priv_config;
+        struct lcm_domain_extended_config extended_config;
+        struct lcm_ramdisk ramdisk;
+        struct lcm_microcode microcode;
+        struct lcm_xsm_flask_policy xsm_flask_policy;
     };
 };
 

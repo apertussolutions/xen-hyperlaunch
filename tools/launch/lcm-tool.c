@@ -124,37 +124,118 @@ int read_and_parse_input_file(const char *filename,
 	return 0;
 }
 
+/* Used to calculate the buffer space needed to add a module to the output */
+int module_strlen(uint16_t type, unsigned int subtype_data,
+                  unsigned int *out_len)
+{
+    switch (type)
+    {
+        case LCM_MODULE_IGNORE:
+        case LCM_MODULE_LAUNCH_CONTROL_MODULE:
+            /* This tool doesn't generate these */
+            return -1;
+
+        case LCM_MODULE_DOMAIN_BASIC_CONFIG:
+        {
+            *out_len = sizeof(struct lcm_module) +
+                       sizeof(struct lcm_domain_basic_config);
+            break;
+        }
+
+        case LCM_MODULE_DOMAIN_HIGH_PRIV_CONFIG:
+        {
+            *out_len = sizeof(struct lcm_module) +
+                       sizeof(struct lcm_domain_high_priv_config);
+            break;
+        }
+
+        case LCM_MODULE_DOMAIN_EXTENDED_CONFIG:
+        {
+            *out_len = sizeof(struct lcm_module) +
+                       sizeof(struct lcm_domain_extended_config) +
+                       subtype_data; /* config string */
+            break;
+        }
+
+        case LCM_MODULE_DOMAIN_RAMDISK:
+        case LCM_MODULE_CPU_MICROCODE:
+        case LCM_MODULE_XSM_FLASK_POLICY:
+            /* TODO: implement these */
+            return -2;
+
+        default:
+            return -1;
+    }
+
+    return 0;
+}
+
 int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 {
 /******* TODO: START WORK IN PROGRESS SECTION ************/
     struct lcm_header_info *header_info;
     struct lcm_module *module;
-    char *domain_config = "{ \"one_potato\": \"medium_hot\" }";
-    unsigned int out_size, written, domain_config_len;
-    unsigned char out_buffer[4096]; /* TODO: dynamic allocation */
+    unsigned int out_size;
+    unsigned int written;
+    unsigned int mod_idx;
+    unsigned int buf_len;
+    unsigned char *out_buffer;
 
-    /* TODO: */
-    strcpy((char *)out_buffer, "Roger that, Alpha Papa: Ten Four!\n");
-    out_size = strlen((char *)out_buffer);
+    const char *modules_path[] = {"modules", NULL};
+    yajl_val modules_v;
 
-    header_info = (struct lcm_header_info *)&out_buffer;
-    memset(header_info, 0, sizeof(struct lcm_header_info));
+    debug("generate_launch_control_module\n");
 
+    buf_len = 4096; /* FIXME */
+
+    out_buffer = malloc(buf_len);
+    if ( !out_buffer )
+        return -ENOMEM;
+
+    memset(out_buffer, 0, buf_len);
+    debug("buffer cleared\n");
+
+    header_info = (struct lcm_header_info *)out_buffer;
     header_info->magic_number = LCM_HEADER_MAGIC_NUMBER;
+    out_size = sizeof(struct lcm_header_info);
 
-    module = &header_info->modules[0];
-    /* TODO: Loop writing the module output */
+    modules_v = yajl_tree_get(config_node, modules_path,
+                                       yajl_t_array);
 
-    domain_config_len = strlen(domain_config) + 1; /* +1 for null term */
+    if ( !modules_v || !YAJL_IS_ARRAY(modules_v) )
+        return -EINVAL;
 
-    module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
-    module->len = sizeof(struct lcm_module) +
-                  sizeof(struct lcm_domain_basic_config);
+    debug("got modules\n");
 
-    module->type = LCM_MODULE_DOMAIN_EXTENDED_CONFIG;
-    module->len = sizeof(struct lcm_module) +
-                  sizeof(struct lcm_domain_extended_config) +
-                  domain_config_len;
+    for ( mod_idx = 0; mod_idx < YAJL_GET_ARRAY(modules_v)->len; mod_idx++)
+    {
+        module = &header_info->modules[mod_idx];
+
+        module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
+        module->len = sizeof(struct lcm_module) +
+                      sizeof(struct lcm_domain_basic_config);
+
+        yajl_val is_priv = yajl_tree_get(
+                        YAJL_GET_ARRAY(modules_v)->values[mod_idx],
+                        (const char *[]){ "permissions", "privileged", NULL },
+                        yajl_t_any);
+        if ( is_priv )
+        {
+            if ( YAJL_IS_TRUE(is_priv) )
+            {
+                debug("is priv: true\n");
+                module->basic_config.permissions |=
+                    LCM_DOMAIN_PERMISSION_PRIVILEGED;
+            }
+            else
+                debug("is priv: false\n");
+        }
+        else
+            debug("is priv: not set\n");
+
+        out_size += module->len; // TODO: overflow protection
+        break;
+    }
 
 
 /******* TODO: END WORK IN PROGRESS SECTION ************/
@@ -165,6 +246,8 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         return 1;
     }
     debug("Wrote: %u bytes\n", written);
+
+    free(out_buffer);
 
     return 0;
 }
@@ -192,6 +275,8 @@ int generate_output(yajl_val config_node, const char *filename)
     /* Errors after this point need to clean up the output file */
 
     ret = generate_launch_control_module(config_node, file_stream);
+
+    debug("Result of gen lcm: %d\n", ret);
 
     if ( fclose(file_stream) )
     {
@@ -243,6 +328,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "Couldn't parse file: %s\n", input_filename);
         return 2;
     }
+
+    debug("Generating output\n");
 
     if ( generate_output(config_node, output_filename) )
     {
