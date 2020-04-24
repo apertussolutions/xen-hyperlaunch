@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -384,6 +385,18 @@ int get_module_basic_config(yajl_val j_cfg, struct lcm_module *module)
     if ( get_config_domain_sid(j_cfg, (const char *[]){ "domain_sid", NULL  },
                                &module->basic_config.domain_sid) )
         return -EINVAL;
+
+    return 0;
+}
+
+int get_module_high_priv_config(yajl_val j_cfg, struct lcm_module *module)
+{
+    if ( get_config_bool(j_cfg, (const char *[]){ "mode", "pv", NULL },
+                         LCM_DOMAIN_HIGH_PRIV_MODE_PARAVIRTUALIZED,
+                         &module->high_priv_config.mode) )
+        return -EINVAL;
+
+    return 0;
 }
 
 /*
@@ -403,7 +416,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     unsigned int multiboot_mod_index;
     unsigned char *out_buffer;
     const char *modules_path[] = {"modules", NULL};
-    yajl_val j_modules, j_mod, j_cfg;
+    yajl_val j_modules, j_mod;
 
     debug("generate_launch_control_module\n");
 
@@ -432,7 +445,12 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     for ( mod_idx = 0; mod_idx < YAJL_GET_ARRAY(j_modules)->len; mod_idx++ )
     {
+        bool basic_config_found = false;
+        yajl_val j_cfg;
+
         j_mod = YAJL_GET_ARRAY(j_modules)->values[mod_idx];
+
+        debug("reading mb_index for mod_idx: %u\n", mod_idx);
 
         if ( get_config_uint(j_mod, (const char *[]){ "mb_index", NULL },
                              0, 255, &multiboot_mod_index) )
@@ -443,28 +461,57 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                               yajl_t_object);
         if ( j_cfg )
         {
+            debug("basic config\n");
+
+            ret = get_module_basic_config(j_cfg, module);
+            if ( ret )
+                return ret;
+
+            basic_config_found = true;
+
             module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
             module->mb_index = multiboot_mod_index;
             module->pad[0] = 0;
             module->len = sizeof(struct lcm_module) +
                           sizeof(struct lcm_domain_basic_config);
 
-            ret = get_module_basic_config(j_cfg, module);
+            out_size += module->len;
+            module = (struct lcm_module *)(((uint8_t *)module) + module->len);
+        }
+
+        /* ---- high priv config ---- */
+        j_cfg = yajl_tree_get(j_mod,
+                              (const char *[]){"high_priv_config", NULL},
+                              yajl_t_object);
+        if ( j_cfg )
+        {
+            debug("high priv config\n");
+
+            if ( basic_config_found )
+            {
+                error("module #%u has both basic and high priv configs\n",
+                       multiboot_mod_index);
+                return -EINVAL;
+            }
+
+            ret = get_module_high_priv_config(j_cfg, module);
             if ( ret )
                 return ret;
 
+            module->type = LCM_MODULE_DOMAIN_HIGH_PRIV_CONFIG;
+            module->mb_index = multiboot_mod_index;
+            module->pad[0] = 0;
+            module->len = sizeof(struct lcm_module) +
+                          sizeof(struct lcm_domain_high_priv_config);
+
             out_size += module->len;
-            /* Alignment ok here due to struct sizing / padding: */
             module = (struct lcm_module *)(((uint8_t *)module) + module->len);
         }
-        /* ---- end of basic config ---- */
 
-        /* TODO: high_priv_config */
         /* TODO: extended_config */
         /* TODO: ramdisk */
         /* TODO: microcode */
         /* TODO: xsm_flask_policy */
-
     }
 
     written = fwrite(out_buffer, 1, out_size, file_stream);
