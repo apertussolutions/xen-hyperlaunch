@@ -6,6 +6,7 @@
  * Copyright (c) 2020, Star Lab Corporation
  */
 
+#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -19,7 +20,16 @@
 
 #include "launch_control_module.h"
 
+/* FIXME: include these from source */
+#define SECINITSID_DOM0     1
+#define SECINITSID_DOMU    10
+#define SECINITSID_DOMDM   11
+#define SECINITSID_DOMBOOT 12
+
 #define MAX_INPUT_FILE_SIZE (1024 * 64) /* in bytes */
+#define MAX_NUMBER_OF_LCM_MODULES 32
+
+#define error(format, args...) fprintf(stderr, "Error: " format, ## args )
 
 #define DEBUG
 
@@ -69,8 +79,8 @@ int read_and_parse_input_file(const char *filename,
     yajl_val node;
     FILE *file_stream;
 
-	errbuf[0] = 0; /* Init with the empty string */
-	errbuf[sizeof(errbuf) - 1] = 0; /* Enforce null-termination */
+    errbuf[0] = 0; /* Init with the empty string */
+    errbuf[sizeof(errbuf) - 1] = 0; /* Enforce null-termination */
 
     debug("Reading and parsing: %s\n", filename);
 
@@ -83,17 +93,17 @@ int read_and_parse_input_file(const char *filename,
 
     /*
      * Read the entire config file.
-	 * Note: reserving the last character of the buffer for the 0 terminator.
+     * Note: reserving the last character of the buffer for the 0 terminator.
      */
     bytes_read = fread(file_buffer, 1, buffer_size - 1, file_stream);
 
-    if ( (bytes_read == 0) || (feof(stdin)) )
-	{
+    if ( (bytes_read == 0) || (feof(file_stream)) )
+    {
         fprintf(stderr, "Read length error (read %zu bytes)\n", bytes_read);
         return 1;
     }
-	else if ( bytes_read > (buffer_size - 1) )
-	{
+    else if ( bytes_read > (buffer_size - 1) )
+    {
         /* This should never happen */
         fprintf(stderr, "Read exceeded buffer size - aborting\n");
         return 1;
@@ -121,7 +131,7 @@ int read_and_parse_input_file(const char *filename,
     /* Success */
     *out_node = node;
 
-	return 0;
+    return 0;
 }
 
 /* Used to calculate the buffer space needed to add a module to the output */
@@ -170,19 +180,225 @@ int module_strlen(uint16_t type, unsigned int subtype_data,
     return 0;
 }
 
+int get_config_bool(yajl_val j_mod, const char *key[], uint32_t val,
+                    uint32_t *var)
+{
+    int i;
+
+    yajl_val j_val = yajl_tree_get(j_mod, key, yajl_t_any);
+    if ( !j_val )
+    {
+        error("missing:");
+        for ( i = 0; key[i] != NULL; i++ )
+            fprintf(stderr, " %s", key[i]);
+        fprintf(stderr, "\n");
+
+        return -1;
+    }
+
+    if ( YAJL_IS_TRUE(j_val) )
+        *var |= val;
+
+    return 0;
+}
+
+int get_config_string(yajl_val j_mod, const char *key[],
+                      unsigned int max_len, uint8_t *out_string)
+{
+    int i;
+    unsigned int len;
+    const char *in_string;
+
+    yajl_val j_val = yajl_tree_get(j_mod, key, yajl_t_string);
+    if ( !j_val )
+    {
+        error("missing:");
+        for ( i = 0; key[i] != NULL; i++ )
+            fprintf(stderr, " %s", key[i]);
+        fprintf(stderr, "\n");
+
+        return -1;
+    }
+
+    in_string = YAJL_GET_STRING(j_val);
+    len = strnlen(in_string, max_len + 1);
+    if ( len > max_len )
+    {
+        error("domain string:");
+        for ( i = 0; key[i] != NULL; i++ )
+            fprintf(stderr, " %s", key[i]);
+        fprintf(stderr, "exceeds maximum length (%d)\n", max_len);
+        return -1;
+    }
+    debug("in: config string: %s\n", in_string);
+
+    strncpy((char *)out_string, in_string, len);
+
+    return 0;
+}
+
+/* Perform string translation for domain sid values */
+int get_config_domain_sid(yajl_val j_mod, const char *key[],
+                          uint32_t *out_sid)
+{
+    int i;
+    char sidbuf[8];
+    const char **labels = (const char *[]){ "dom0", "domDM", "domU", "domBoot",
+                                            NULL };
+    unsigned int *sid_vals = (unsigned int []){ SECINITSID_DOM0,
+                                                SECINITSID_DOMDM,
+                                                SECINITSID_DOMU,
+                                                SECINITSID_DOMBOOT };
+
+    for ( i = 0; labels[i] != NULL; i++ )
+        assert(sizeof(sidbuf) >= strlen(labels[i]));
+
+    memset(sidbuf, 0, sizeof(sidbuf));
+
+    if ( get_config_string(j_mod, key, sizeof(sidbuf)-1, (uint8_t *)sidbuf) )
+        return -1;
+
+    for ( i = 0; labels[i] != NULL; i++ )
+    {
+        if ( !strncmp(labels[i], sidbuf, sizeof(sidbuf)) )
+        {
+            *out_sid = sid_vals[i];
+            return 0;
+        }
+    }
+
+    error("domain sid value unrecognized: %s\nacceptable values:\n", sidbuf);
+    for ( i = 0; labels[i] != NULL; i++ )
+        fprintf(stderr, " - %s\n", labels[i]);
+
+    return -1;
+}
+
+int get_config_uint(yajl_val j_mod, const char *key[],
+                    unsigned int min, unsigned int max,
+                    unsigned int *out_int)
+{
+    int i;
+    unsigned int in_val;
+
+    yajl_val j_val = yajl_tree_get(j_mod, key, yajl_t_number);
+    if ( !j_val || !YAJL_IS_INTEGER(j_val) )
+    {
+        error("missing or invalid value:");
+        for ( i = 0; key[i] != NULL; i++ )
+            fprintf(stderr, " %s", key[i]);
+        fprintf(stderr, "\n");
+
+        return -1;
+    }
+
+    in_val = YAJL_GET_INTEGER(j_val);
+    if ( (in_val < min) || (in_val > max) )
+    {
+        error("value outside range [%u, %u]:", min, max);
+        for ( i = 0; key[i] != NULL; i++ )
+            fprintf(stderr, " %s", key[i]);
+        fprintf(stderr, "\n");
+        return -1;
+    }
+
+    *out_int = in_val;
+
+    return 0;
+}
+
+int get_config_memory_size(yajl_val j_mod, const char *key[],
+                             uint64_t *out_mem_size)
+{
+    int i;
+    unsigned long long in_val;
+
+    yajl_val j_val = yajl_tree_get(j_mod, key, yajl_t_number);
+    if ( !j_val || !YAJL_IS_INTEGER(j_val) )
+    {
+        error("missing or invalid value:");
+        for ( i = 0; key[i] != NULL; i++ )
+            fprintf(stderr, " %s", key[i]);
+        fprintf(stderr, "\n");
+
+        return -1;
+    }
+
+    in_val = YAJL_GET_INTEGER(j_val);
+#define MAX_MEMORY_SIZE ( 1024UL * 1024UL * 1024UL * 1024UL )
+    if ( (in_val == 0) || (in_val > MAX_MEMORY_SIZE) )
+        return -1;
+
+    *out_mem_size = in_val;
+
+    return 0;
+}
+
+int get_module_basic_config(yajl_val j_cfg, struct lcm_module *module)
+{
+    if ( get_config_bool(j_cfg, (const char *[]){ "permissions", "privileged",
+                                                  NULL },
+                         LCM_DOMAIN_PERMISSION_PRIVILEGED,
+                         &module->basic_config.permissions) )
+        return -EINVAL;
+
+    if ( get_config_bool(j_cfg, (const char *[]){ "permissions", "hardware",
+                                                  NULL },
+                         LCM_DOMAIN_PERMISSION_HARDWARE,
+                         &module->basic_config.permissions) )
+        return -EINVAL;
+
+
+    if ( get_config_bool(j_cfg, (const char *[]){ "functions", "boot", NULL },
+                         LCM_DOMAIN_FUNCTION_BOOT,
+                         &module->basic_config.functions) )
+        return -EINVAL;
+
+    if ( get_config_bool(j_cfg, (const char *[]){ "functions", "console",
+                                                  NULL },
+                         LCM_DOMAIN_FUNCTION_CONSOLE,
+                         &module->basic_config.functions) )
+        return -EINVAL;
+
+    if ( get_config_bool(j_cfg, (const char *[]){ "mode", "pv", NULL },
+                         LCM_DOMAIN_MODE_PARAVIRTUALIZED,
+                         &module->basic_config.mode) )
+        return -EINVAL;
+
+    if ( get_config_bool(j_cfg, (const char *[]){ "mode",
+                                                  "device_model", NULL },
+                         LCM_DOMAIN_MODE_ENABLE_DEVICE_MODEL,
+                         &module->basic_config.mode) )
+        return -EINVAL;
+
+    if ( get_config_string(j_cfg, (const char *[]){ "domain_handle", NULL },
+                           sizeof(module->basic_config.domain_handle),
+                           (uint8_t *)&module->basic_config.domain_handle) )
+        return -EINVAL;
+
+    if ( get_config_memory_size(j_cfg, (const char *[]){ "memory_size",
+                                                         NULL  },
+                                &module->basic_config.mem_size) )
+        return -EINVAL;
+
+    if ( get_config_domain_sid(j_cfg, (const char *[]){ "domain_sid", NULL  },
+                               &module->basic_config.domain_sid) )
+        return -EINVAL;
+}
+
 int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 {
-/******* TODO: START WORK IN PROGRESS SECTION ************/
     struct lcm_header_info *header_info;
     struct lcm_module *module;
+    int ret;
     unsigned int out_size;
     unsigned int written;
     unsigned int mod_idx;
     unsigned int buf_len;
+    unsigned int multiboot_mod_index;
     unsigned char *out_buffer;
-
     const char *modules_path[] = {"modules", NULL};
-    yajl_val modules_v;
+    yajl_val j_modules, j_mod, j_cfg;
 
     debug("generate_launch_control_module\n");
 
@@ -199,46 +415,53 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     header_info->magic_number = LCM_HEADER_MAGIC_NUMBER;
     out_size = sizeof(struct lcm_header_info);
 
-    modules_v = yajl_tree_get(config_node, modules_path,
-                                       yajl_t_array);
+    j_modules = yajl_tree_get(config_node, modules_path, yajl_t_array);
 
-    if ( !modules_v || !YAJL_IS_ARRAY(modules_v) )
+    if ( !j_modules || !YAJL_IS_ARRAY(j_modules) ||
+         YAJL_GET_ARRAY(j_modules)->len > MAX_NUMBER_OF_LCM_MODULES )
         return -EINVAL;
 
     debug("got modules\n");
 
-    for ( mod_idx = 0; mod_idx < YAJL_GET_ARRAY(modules_v)->len; mod_idx++)
+    module = &header_info->modules[0]; /* Indexing only valid for 0th module */
+
+    for ( mod_idx = 0; mod_idx < YAJL_GET_ARRAY(j_modules)->len; mod_idx++ )
     {
-        module = &header_info->modules[mod_idx];
+        j_mod = YAJL_GET_ARRAY(j_modules)->values[mod_idx];
 
-        module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
-        module->len = sizeof(struct lcm_module) +
-                      sizeof(struct lcm_domain_basic_config);
+        if ( get_config_uint(j_mod, (const char *[]){ "mb_index", NULL },
+                             0, 255, &multiboot_mod_index) )
+            return -EINVAL;
 
-        yajl_val is_priv = yajl_tree_get(
-                        YAJL_GET_ARRAY(modules_v)->values[mod_idx],
-                        (const char *[]){ "permissions", "privileged", NULL },
-                        yajl_t_any);
-        if ( is_priv )
+        /* ---- basic config ---- */
+        j_cfg = yajl_tree_get(j_mod, (const char *[]){"basic_config", NULL},
+                              yajl_t_object);
+        if ( j_cfg )
         {
-            if ( YAJL_IS_TRUE(is_priv) )
-            {
-                debug("is priv: true\n");
-                module->basic_config.permissions |=
-                    LCM_DOMAIN_PERMISSION_PRIVILEGED;
-            }
-            else
-                debug("is priv: false\n");
-        }
-        else
-            debug("is priv: not set\n");
+            module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
+            module->mb_index = multiboot_mod_index;
+            module->pad[0] = 0;
+            module->len = sizeof(struct lcm_module) +
+                          sizeof(struct lcm_domain_basic_config);
 
-        out_size += module->len; // TODO: overflow protection
-        break;
+            ret = get_module_basic_config(j_cfg, module);
+            if ( ret )
+                return ret;
+
+            out_size += module->len;
+            /* Alignment ok here due to struct sizing / padding: */
+            module = (struct lcm_module *)(((uint8_t *)module) + module->len);
+        }
+        /* ---- end of basic config ---- */
+
+        /* TODO: high_priv_config */
+        /* TODO: extended_config */
+        /* TODO: ramdisk */
+        /* TODO: microcode */
+        /* TODO: xsm_flask_policy */
+
     }
 
-
-/******* TODO: END WORK IN PROGRESS SECTION ************/
     written = fwrite(out_buffer, 1, out_size, file_stream);
     if ( written < out_size )
     {
