@@ -204,7 +204,8 @@ int get_config_bool(yajl_val j_mod, const char *key[], uint32_t val,
 }
 
 int get_config_string(yajl_val j_mod, const char *key[],
-                      unsigned int max_len, uint8_t *out_string)
+                      unsigned int max_len, unsigned int *out_len,
+                      uint8_t *out_string)
 {
     int i;
     unsigned int len;
@@ -234,6 +235,7 @@ int get_config_string(yajl_val j_mod, const char *key[],
     debug("in: config string: %s\n", in_string);
 
     strncpy((char *)out_string, in_string, len);
+    *out_len = len;
 
     return 0;
 }
@@ -244,6 +246,7 @@ int get_config_domain_sid(yajl_val j_mod, const char *key[],
 {
     int i;
     char sidbuf[8];
+    unsigned int cfg_len;
     const char **labels = (const char *[]){ "dom0", "domDM", "domU", "domBoot",
                                             NULL };
     unsigned int *sid_vals = (unsigned int []){ SECINITSID_DOM0,
@@ -256,7 +259,8 @@ int get_config_domain_sid(yajl_val j_mod, const char *key[],
 
     memset(sidbuf, 0, sizeof(sidbuf));
 
-    if ( get_config_string(j_mod, key, sizeof(sidbuf)-1, (uint8_t *)sidbuf) )
+    if ( get_config_string(j_mod, key, sizeof(sidbuf)-1, &cfg_len,
+                           (uint8_t *)sidbuf) )
         return -1;
 
     for ( i = 0; labels[i] != NULL; i++ )
@@ -337,6 +341,8 @@ int get_config_memory_size(yajl_val j_mod, const char *key[],
 
 int get_module_basic_config(yajl_val j_cfg, struct lcm_module *module)
 {
+    unsigned int cfg_len;
+
     if ( get_config_bool(j_cfg, (const char *[]){ "permissions", "privileged",
                                                   NULL },
                          LCM_DOMAIN_PERMISSION_PRIVILEGED,
@@ -374,6 +380,7 @@ int get_module_basic_config(yajl_val j_cfg, struct lcm_module *module)
 
     if ( get_config_string(j_cfg, (const char *[]){ "domain_handle", NULL },
                            sizeof(module->basic_config.domain_handle),
+                           &cfg_len,
                            (uint8_t *)&module->basic_config.domain_handle) )
         return -EINVAL;
 
@@ -395,6 +402,18 @@ int get_module_high_priv_config(yajl_val j_cfg, struct lcm_module *module)
                          LCM_DOMAIN_HIGH_PRIV_MODE_PARAVIRTUALIZED,
                          &module->high_priv_config.mode) )
         return -EINVAL;
+
+    return 0;
+}
+
+int get_module_extended_config(yajl_val j_cfg, struct lcm_module *module,
+                               unsigned int max_config_len,
+                               unsigned int *out_config_len)
+{
+    if ( get_config_string(j_cfg, (const char *[]){ "config", NULL },
+                           max_config_len, out_config_len,
+                           &module->extended_config.config_string[0]) )
+        return -1;
 
     return 0;
 }
@@ -508,7 +527,41 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             module = (struct lcm_module *)(((uint8_t *)module) + module->len);
         }
 
-        /* TODO: extended_config */
+        /* ---- extended config ---- */
+        j_cfg = yajl_tree_get(j_mod,
+                              (const char *[]){"extended_config", NULL},
+                              yajl_t_object);
+        if ( j_cfg )
+        {
+            /* FIXME: a better max_len_config_string here */
+            unsigned int max_len_config_string = buf_len
+                - out_size
+                - sizeof(struct lcm_module)
+                - sizeof(struct lcm_domain_extended_config);
+            unsigned int len_config_string;
+
+            debug("extended config\n");
+
+            ret = get_module_extended_config(j_cfg, module,
+                                             max_len_config_string,
+                                             &len_config_string);
+            if ( ret )
+                return ret;
+
+            debug("extended config string length: %u\n", len_config_string);
+
+            module->type = LCM_MODULE_DOMAIN_EXTENDED_CONFIG;
+            module->mb_index = multiboot_mod_index;
+            module->pad[0] = 0;
+            module->len = sizeof(struct lcm_module) +
+                          sizeof(struct lcm_domain_extended_config) +
+                          len_config_string;
+
+            out_size += module->len;
+            module = (struct lcm_module *)(((uint8_t *)module) + module->len);
+        }
+
+
         /* TODO: ramdisk */
         /* TODO: microcode */
         /* TODO: xsm_flask_policy */

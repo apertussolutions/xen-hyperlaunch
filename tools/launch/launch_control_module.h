@@ -58,7 +58,7 @@ struct lcm_domain_extended_config {
      * The length of this string is determined by the len field of the
      * lcm_module struct, minus all fixed-length fields in lcm_module.
      */
-    char *config_string[0];
+    uint8_t config_string[0];
 };
 
 /* Module data pertaining to a domain ramdisk */
