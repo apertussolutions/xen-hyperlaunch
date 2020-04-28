@@ -382,11 +382,6 @@ int get_domain_extended_config(yajl_val j_cfg, struct lcm_domain *domain,
     return 0;
 }
 
-/*
- * TODO: enforce/validate constraints on the LCM:
- *       - is there a description for each multiboot module, or are there
- *         gaps below the highest-numbered mb_index from the input?
- */
 int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 {
     struct lcm_header_info *header_info;
