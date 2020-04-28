@@ -29,6 +29,8 @@
 
 #define MAX_INPUT_FILE_SIZE (1024 * 64) /* in bytes */
 #define MAX_NUMBER_OF_LCM_MODULES 32
+#define MAX_NUMBER_OF_DOMAINS 32
+#define MAX_NUMBER_OF_MULTIBOOT_MODULES 255
 
 #define error(format, args...) fprintf(stderr, "Error: " format, ## args )
 
@@ -430,11 +432,11 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     int ret;
     unsigned int out_size;
     unsigned int written;
-    unsigned int mod_idx;
+    unsigned int dom_idx;
     unsigned int buf_len;
-    unsigned int multiboot_mod_index;
+    unsigned int kernel_mb_index;
     unsigned char *out_buffer;
-    yajl_val j_modules, j_mod;
+    yajl_val j_modules, j_domains, j_module_type, j_dom;
 
     debug("generate_launch_control_module\n");
 
@@ -460,23 +462,56 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     debug("got modules\n");
 
+    j_domains = yajl_tree_get(config_node, (const char *[]){ "domains", NULL },
+                              yajl_t_array);
+
+    if ( !j_domains || !YAJL_IS_ARRAY(j_domains) ||
+         YAJL_GET_ARRAY(j_domains)->len > MAX_NUMBER_OF_DOMAINS )
+        return -EINVAL;
+
+    debug("got domains\n");
+
     module = &header_info->modules[0]; /* Indexing only valid for 0th module */
 
-    for ( mod_idx = 0; mod_idx < YAJL_GET_ARRAY(j_modules)->len; mod_idx++ )
+    for ( dom_idx = 0; dom_idx < YAJL_GET_ARRAY(j_domains)->len; dom_idx++ )
     {
         bool basic_config_found = false;
         yajl_val j_cfg;
 
-        j_mod = YAJL_GET_ARRAY(j_modules)->values[mod_idx];
+        j_dom = YAJL_GET_ARRAY(j_domains)->values[dom_idx];
 
-        debug("reading mb_index for mod_idx: %u\n", mod_idx);
-
-        if ( get_config_uint(j_mod, (const char *[]){ "mb_index", NULL },
-                             0, 255, &multiboot_mod_index) )
+        if ( get_config_uint(j_dom,
+                             (const char *[]){ "modules", "kernel", NULL },
+                             0, MAX_NUMBER_OF_MULTIBOOT_MODULES,
+                             &kernel_mb_index) )
+        {
+            error("Missing a kernel for domain (%u/%lu)\n", dom_idx+1,
+                  YAJL_GET_ARRAY(j_domains)->len);
             return -EINVAL;
+        }
+
+        debug("reading domain metadata for dom_idx: %u using kernel %u\n",
+              dom_idx, kernel_mb_index);
+
+        /* ---- verify that the indicated module is indeed a kernel */
+        if ( kernel_mb_index >= YAJL_GET_ARRAY(j_modules)->len )
+        {
+            error("domain (%u/%lu) kernel index invalid\n",
+                  dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
+            return -EINVAL;
+        }
+
+        j_module_type = YAJL_GET_ARRAY(j_modules)->values[kernel_mb_index];
+        if ( !YAJL_IS_STRING(j_module_type) ||
+             strncmp(j_module_type->u.string, "kernel", 7) )
+        {
+            error("domain (%u/%lu) has kernel index mismatches module type\n",
+                  dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
+            return -EINVAL;
+        }
 
         /* ---- basic config ---- */
-        j_cfg = yajl_tree_get(j_mod, (const char *[]){"basic_config", NULL},
+        j_cfg = yajl_tree_get(j_dom, (const char *[]){"basic_config", NULL},
                               yajl_t_object);
         if ( j_cfg )
         {
@@ -489,7 +524,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             basic_config_found = true;
 
             module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
-            module->mb_index = multiboot_mod_index;
+            module->mb_index = kernel_mb_index;
             module->pad[0] = 0;
             module->len = sizeof(struct lcm_module) +
                           sizeof(struct lcm_domain_basic_config);
@@ -499,7 +534,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         }
 
         /* ---- high priv config ---- */
-        j_cfg = yajl_tree_get(j_mod,
+        j_cfg = yajl_tree_get(j_dom,
                               (const char *[]){"high_priv_config", NULL},
                               yajl_t_object);
         if ( j_cfg )
@@ -509,7 +544,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             if ( basic_config_found )
             {
                 error("module #%u has both basic and high priv configs\n",
-                       multiboot_mod_index);
+                       kernel_mb_index);
                 return -EINVAL;
             }
 
@@ -518,7 +553,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                 return ret;
 
             module->type = LCM_MODULE_DOMAIN_HIGH_PRIV_CONFIG;
-            module->mb_index = multiboot_mod_index;
+            module->mb_index = kernel_mb_index;
             module->pad[0] = 0;
             module->len = sizeof(struct lcm_module) +
                           sizeof(struct lcm_domain_high_priv_config);
@@ -528,7 +563,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         }
 
         /* ---- extended config ---- */
-        j_cfg = yajl_tree_get(j_mod,
+        j_cfg = yajl_tree_get(j_dom,
                               (const char *[]){"extended_config", NULL},
                               yajl_t_object);
         if ( j_cfg )
@@ -551,7 +586,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             debug("extended config string length: %u\n", len_config_string);
 
             module->type = LCM_MODULE_DOMAIN_EXTENDED_CONFIG;
-            module->mb_index = multiboot_mod_index;
+            module->mb_index = kernel_mb_index;
             module->pad[0] = 0;
             module->len = sizeof(struct lcm_module) +
                           sizeof(struct lcm_domain_extended_config) +
