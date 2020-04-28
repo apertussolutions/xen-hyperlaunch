@@ -197,8 +197,8 @@ int get_config_string(yajl_val j_mod, const char *key[],
 }
 
 /* Perform string translation for domain sid values */
-int get_config_domain_sid(yajl_val j_mod, const char *key[],
-                          uint32_t *out_sid)
+int get_config_xsm_sid(yajl_val j_mod, const char *key[],
+                       uint32_t *out_sid)
 {
     int i;
     char sidbuf[8];
@@ -340,13 +340,13 @@ int get_domain_basic_config(yajl_val j_cfg, struct lcm_domain *domain)
                            (uint8_t *)&domain->basic_config.domain_handle) )
         return -EINVAL;
 
-    if ( get_config_memory_size(j_cfg, (const char *[]){ "memory_size",
+    if ( get_config_memory_size(j_cfg, (const char *[]){ "memory",
                                                          NULL  },
                                 &domain->basic_config.mem_size) )
         return -EINVAL;
 
-    if ( get_config_domain_sid(j_cfg, (const char *[]){ "domain_sid", NULL  },
-                               &domain->basic_config.domain_sid) )
+    if ( get_config_xsm_sid(j_cfg, (const char *[]){ "xsm_sid", NULL  },
+                            &domain->basic_config.xsm_sid) )
         return -EINVAL;
 
     return 0;

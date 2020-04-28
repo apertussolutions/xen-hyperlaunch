@@ -32,7 +32,7 @@ struct lcm_domain_basic_config {
     uint64_t mem_size;
 
     /* XSM/Flask sid */
-    uint32_t domain_sid;
+    uint32_t xsm_sid;
 };
 
 /*
