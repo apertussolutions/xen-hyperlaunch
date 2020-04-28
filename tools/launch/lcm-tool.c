@@ -137,52 +137,6 @@ int read_and_parse_input_file(const char *filename,
     return 0;
 }
 
-/* Used to calculate the buffer space needed to add a module to the output */
-int module_strlen(uint16_t type, unsigned int subtype_data,
-                  unsigned int *out_len)
-{
-    switch (type)
-    {
-        case LCM_MODULE_IGNORE:
-        case LCM_MODULE_LAUNCH_CONTROL_MODULE:
-            /* This tool doesn't generate these */
-            return -1;
-
-        case LCM_MODULE_DOMAIN_BASIC_CONFIG:
-        {
-            *out_len = sizeof(struct lcm_module) +
-                       sizeof(struct lcm_domain_basic_config);
-            break;
-        }
-
-        case LCM_MODULE_DOMAIN_HIGH_PRIV_CONFIG:
-        {
-            *out_len = sizeof(struct lcm_module) +
-                       sizeof(struct lcm_domain_high_priv_config);
-            break;
-        }
-
-        case LCM_MODULE_DOMAIN_EXTENDED_CONFIG:
-        {
-            *out_len = sizeof(struct lcm_module) +
-                       sizeof(struct lcm_domain_extended_config) +
-                       subtype_data; /* config string */
-            break;
-        }
-
-        case LCM_MODULE_DOMAIN_RAMDISK:
-        case LCM_MODULE_CPU_MICROCODE:
-        case LCM_MODULE_XSM_FLASK_POLICY:
-            /* TODO: implement these */
-            return -2;
-
-        default:
-            return -1;
-    }
-
-    return 0;
-}
-
 int get_config_bool(yajl_val j_mod, const char *key[], uint32_t val,
                     uint32_t *var)
 {
@@ -341,80 +295,80 @@ int get_config_memory_size(yajl_val j_mod, const char *key[],
     return 0;
 }
 
-int get_module_basic_config(yajl_val j_cfg, struct lcm_module *module)
+int get_domain_basic_config(yajl_val j_cfg, struct lcm_domain *domain)
 {
     unsigned int cfg_len;
 
     if ( get_config_bool(j_cfg, (const char *[]){ "permissions", "privileged",
                                                   NULL },
                          LCM_DOMAIN_PERMISSION_PRIVILEGED,
-                         &module->basic_config.permissions) )
+                         &domain->basic_config.permissions) )
         return -EINVAL;
 
     if ( get_config_bool(j_cfg, (const char *[]){ "permissions", "hardware",
                                                   NULL },
                          LCM_DOMAIN_PERMISSION_HARDWARE,
-                         &module->basic_config.permissions) )
+                         &domain->basic_config.permissions) )
         return -EINVAL;
 
 
     if ( get_config_bool(j_cfg, (const char *[]){ "functions", "boot", NULL },
                          LCM_DOMAIN_FUNCTION_BOOT,
-                         &module->basic_config.functions) )
+                         &domain->basic_config.functions) )
         return -EINVAL;
 
     if ( get_config_bool(j_cfg, (const char *[]){ "functions", "console",
                                                   NULL },
                          LCM_DOMAIN_FUNCTION_CONSOLE,
-                         &module->basic_config.functions) )
+                         &domain->basic_config.functions) )
         return -EINVAL;
 
     if ( get_config_bool(j_cfg, (const char *[]){ "mode", "pv", NULL },
                          LCM_DOMAIN_MODE_PARAVIRTUALIZED,
-                         &module->basic_config.mode) )
+                         &domain->basic_config.mode) )
         return -EINVAL;
 
     if ( get_config_bool(j_cfg, (const char *[]){ "mode",
                                                   "device_model", NULL },
                          LCM_DOMAIN_MODE_ENABLE_DEVICE_MODEL,
-                         &module->basic_config.mode) )
+                         &domain->basic_config.mode) )
         return -EINVAL;
 
     if ( get_config_string(j_cfg, (const char *[]){ "domain_handle", NULL },
-                           sizeof(module->basic_config.domain_handle),
+                           sizeof(domain->basic_config.domain_handle),
                            &cfg_len,
-                           (uint8_t *)&module->basic_config.domain_handle) )
+                           (uint8_t *)&domain->basic_config.domain_handle) )
         return -EINVAL;
 
     if ( get_config_memory_size(j_cfg, (const char *[]){ "memory_size",
                                                          NULL  },
-                                &module->basic_config.mem_size) )
+                                &domain->basic_config.mem_size) )
         return -EINVAL;
 
     if ( get_config_domain_sid(j_cfg, (const char *[]){ "domain_sid", NULL  },
-                               &module->basic_config.domain_sid) )
+                               &domain->basic_config.domain_sid) )
         return -EINVAL;
 
     return 0;
 }
 
-int get_module_high_priv_config(yajl_val j_cfg, struct lcm_module *module)
+int get_domain_high_priv_config(yajl_val j_cfg, struct lcm_domain *domain)
 {
     if ( get_config_bool(j_cfg, (const char *[]){ "mode", "pv", NULL },
                          LCM_DOMAIN_HIGH_PRIV_MODE_PARAVIRTUALIZED,
-                         &module->high_priv_config.mode) )
+                         &domain->high_priv_config.mode) )
         return -EINVAL;
 
     return 0;
 }
 
-int get_module_extended_config(yajl_val j_cfg, struct lcm_module *module,
+int get_domain_extended_config(yajl_val j_cfg, struct lcm_domain *domain,
                                unsigned int max_config_len,
                                unsigned int *out_config_len)
 {
     if ( get_config_string(j_cfg, (const char *[]){ "config", NULL },
                            max_config_len, out_config_len,
-                           &module->extended_config.config_string[0]) )
+                           &domain->extended_config.config_string[0]) )
         return -1;
 
     return 0;
@@ -428,10 +382,11 @@ int get_module_extended_config(yajl_val j_cfg, struct lcm_module *module,
 int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 {
     struct lcm_header_info *header_info;
-    struct lcm_module *module;
+    struct lcm_entry *entry;
     int ret;
     unsigned int out_size;
     unsigned int written;
+    unsigned int mod_idx;
     unsigned int dom_idx;
     unsigned int buf_len;
     unsigned int kernel_mb_index;
@@ -453,6 +408,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     header_info->magic_number = LCM_HEADER_MAGIC_NUMBER;
     out_size = sizeof(struct lcm_header_info);
 
+    /* ---- modules ---- */
     j_modules = yajl_tree_get(config_node, (const char *[]){ "modules", NULL },
                               yajl_t_array);
 
@@ -462,6 +418,58 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     debug("got modules\n");
 
+    entry = &header_info->entries[0]; /* Indexing only valid for 0th module */
+    entry->type = LCM_DATA_MODULE_TYPES;
+    entry->module_types.num_modules = YAJL_GET_ARRAY(j_modules)->len;
+
+    for ( mod_idx = 0; mod_idx < entry->module_types.num_modules; mod_idx++ )
+    {
+        j_module_type = YAJL_GET_ARRAY(j_modules)->values[mod_idx];
+        if ( !YAJL_IS_STRING(j_module_type) )
+        {
+            error("Module type is not a string\n");
+            return -EINVAL;
+        }
+
+        debug("module: (%u/%u) : %s\n", mod_idx+1,
+              entry->module_types.num_modules, j_module_type->u.string);
+
+        if ( strncmp(j_module_type->u.string, "kernel", 7) )
+        {
+            entry->module_types.types[mod_idx] = LCM_MODULE_DOMAIN_KERNEL;
+        }
+        else if ( strncmp(j_module_type->u.string, "ramdisk", 8) )
+        {
+            entry->module_types.types[mod_idx] = LCM_MODULE_DOMAIN_RAMDISK;
+        }
+        else if ( strncmp(j_module_type->u.string, "microcode", 10) )
+        {
+            entry->module_types.types[mod_idx] = LCM_MODULE_CPU_MICROCODE;
+        }
+        else if ( strncmp(j_module_type->u.string, "xsm_flask", 10) )
+        {
+            entry->module_types.types[mod_idx] = LCM_MODULE_XSM_FLASK_POLICY;
+        }
+        else
+        {
+            error("Module type (%s) is unknown\n", j_module_type->u.string);
+            return -EINVAL;
+        }
+    }
+    /* pad the end of the struct, up to three extra bytes */
+    for ( ; (mod_idx / 4) < ((mod_idx + 3) / 4) ; mod_idx++ )
+    {
+        debug("padding module type array with 1 byte\n");
+        entry->module_types.types[mod_idx] = 0;
+    }
+
+    entry->len = sizeof(struct lcm_entry) +
+                 sizeof(struct lcm_module_types) + mod_idx;
+
+    out_size += entry->len;
+    entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+
+    /* ---- domains ---- */
     j_domains = yajl_tree_get(config_node, (const char *[]){ "domains", NULL },
                               yajl_t_array);
 
@@ -470,8 +478,6 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         return -EINVAL;
 
     debug("got domains\n");
-
-    module = &header_info->modules[0]; /* Indexing only valid for 0th module */
 
     for ( dom_idx = 0; dom_idx < YAJL_GET_ARRAY(j_domains)->len; dom_idx++ )
     {
@@ -517,20 +523,19 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         {
             debug("basic config\n");
 
-            ret = get_module_basic_config(j_cfg, module);
+            ret = get_domain_basic_config(j_cfg, &entry->domain);
             if ( ret )
                 return ret;
 
             basic_config_found = true;
 
-            module->type = LCM_MODULE_DOMAIN_BASIC_CONFIG;
-            module->mb_index = kernel_mb_index;
-            module->pad[0] = 0;
-            module->len = sizeof(struct lcm_module) +
-                          sizeof(struct lcm_domain_basic_config);
+            entry->type = LCM_DOMAIN_BASIC_CONFIG;
+            entry->len = sizeof(struct lcm_entry) +
+                         sizeof(struct lcm_domain) +
+                         sizeof(struct lcm_domain_basic_config);
 
-            out_size += module->len;
-            module = (struct lcm_module *)(((uint8_t *)module) + module->len);
+            out_size += entry->len;
+            entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
         }
 
         /* ---- high priv config ---- */
@@ -548,18 +553,17 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                 return -EINVAL;
             }
 
-            ret = get_module_high_priv_config(j_cfg, module);
+            ret = get_domain_high_priv_config(j_cfg, &entry->domain);
             if ( ret )
                 return ret;
 
-            module->type = LCM_MODULE_DOMAIN_HIGH_PRIV_CONFIG;
-            module->mb_index = kernel_mb_index;
-            module->pad[0] = 0;
-            module->len = sizeof(struct lcm_module) +
-                          sizeof(struct lcm_domain_high_priv_config);
+            entry->type = LCM_DOMAIN_HIGH_PRIV_CONFIG;
+            entry->len = sizeof(struct lcm_entry) +
+                         sizeof(struct lcm_domain) +
+                         sizeof(struct lcm_domain_high_priv_config);
 
-            out_size += module->len;
-            module = (struct lcm_module *)(((uint8_t *)module) + module->len);
+            out_size += entry->len;
+            entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
         }
 
         /* ---- extended config ---- */
@@ -568,16 +572,17 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                               yajl_t_object);
         if ( j_cfg )
         {
+            unsigned int len_config_string;
             /* FIXME: a better max_len_config_string here */
             unsigned int max_len_config_string = buf_len
                 - out_size
-                - sizeof(struct lcm_module)
+                - sizeof(struct lcm_entry)
+                - sizeof(struct lcm_domain)
                 - sizeof(struct lcm_domain_extended_config);
-            unsigned int len_config_string;
 
             debug("extended config\n");
 
-            ret = get_module_extended_config(j_cfg, module,
+            ret = get_domain_extended_config(j_cfg, &entry->domain,
                                              max_len_config_string,
                                              &len_config_string);
             if ( ret )
@@ -585,15 +590,14 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
             debug("extended config string length: %u\n", len_config_string);
 
-            module->type = LCM_MODULE_DOMAIN_EXTENDED_CONFIG;
-            module->mb_index = kernel_mb_index;
-            module->pad[0] = 0;
-            module->len = sizeof(struct lcm_module) +
-                          sizeof(struct lcm_domain_extended_config) +
-                          len_config_string;
+            entry->type = LCM_DOMAIN_EXTENDED_CONFIG;
+            entry->len = sizeof(struct lcm_entry) +
+                         sizeof(struct lcm_domain) +
+                         sizeof(struct lcm_domain_extended_config) +
+                         len_config_string;
 
-            out_size += module->len;
-            module = (struct lcm_module *)(((uint8_t *)module) + module->len);
+            out_size += entry->len;
+            entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
         }
 
 

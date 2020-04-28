@@ -25,7 +25,7 @@ struct lcm_domain_basic_config {
 #define LCM_DOMAIN_MODE_PARAVIRTUALIZED     (1 << 0) /* PV | PVH/HVM */
 #define LCM_DOMAIN_MODE_ENABLE_DEVICE_MODEL (1 << 1) /* PVH | HVM */
 
-    /* xen_domain_handle_t : see handle field in struct domain */
+    /* xen_domain_handle_t : see handle field in Xen's struct domain */
     uint8_t domain_handle[16];
 
     /* Domain size in bytes */
@@ -56,7 +56,8 @@ struct lcm_domain_high_priv_config {
 struct lcm_domain_extended_config {
     /*
      * The length of this string is determined by the len field of the
-     * lcm_module struct, minus all fixed-length fields in lcm_module.
+     * lcm_entry struct, minus all fixed-length fields in lcm_entry and
+     * lcm_domain.
      */
     uint8_t config_string[0];
 };
@@ -83,36 +84,72 @@ struct lcm_xsm_flask_policy {
     uint8_t version;
 };
 
-struct lcm_module {
+struct lcm_domain_multiboot_modules {
+    /* Index of the domain kernel in the multiboot module array */
+    uint8_t kernel_index;
+    /* Boolean indicator of ramdisk presence */
+    uint8_t has_ramdisk;
+    /* Index of the domain ramdisk in the multiboot module array */
+    uint8_t ramdisk_index;
+    uint8_t pad;
+};
+
+struct lcm_domain {
     /* Type of data in this struct describing a multiboot module */
     uint16_t type;
-#define LCM_MODULE_IGNORE                   0 /* Skip this data */
-#define LCM_MODULE_LAUNCH_CONTROL_MODULE    1
-#define LCM_MODULE_DOMAIN_BASIC_CONFIG      2
-#define LCM_MODULE_DOMAIN_HIGH_PRIV_CONFIG  3
-#define LCM_MODULE_DOMAIN_EXTENDED_CONFIG   4
-#define LCM_MODULE_DOMAIN_RAMDISK           5
-#define LCM_MODULE_CPU_MICROCODE            6
-#define LCM_MODULE_XSM_FLASK_POLICY         7
-
-    /* Length of this lcm_module struct including the subtype union */
-    uint32_t len;
-
-    /* Index of this module in the multiboot module array */
-    uint8_t mb_index;
-
-    /* Padding to ensure that the union field is 4-byte aligned */
-    uint8_t pad[1];
+#define LCM_DOMAIN_MODULES           1
+#define LCM_DOMAIN_BASIC_CONFIG      2
+#define LCM_DOMAIN_HIGH_PRIV_CONFIG  3
+#define LCM_DOMAIN_EXTENDED_CONFIG   4
 
     /* Module-type-specific module data */
     union {
         uint8_t raw[0];
+        struct lcm_domain_multiboot_modules multiboot_modules;
         struct lcm_domain_basic_config basic_config;
         struct lcm_domain_high_priv_config high_priv_config;
         struct lcm_domain_extended_config extended_config;
-        struct lcm_ramdisk ramdisk;
-        struct lcm_microcode microcode;
-        struct lcm_xsm_flask_policy xsm_flask_policy;
+    };
+};
+
+/* Structure containing an array declaring the type of each multiboot module */
+struct lcm_module_types {
+    uint32_t num_modules;
+
+    /* Array of: type of each multiboot module */
+    uint8_t types[0];
+#define LCM_MODULE_IGNORE                   0
+#define LCM_MODULE_LAUNCH_CONTROL_MODULE    1
+#define LCM_MODULE_DOMAIN_KERNEL            2
+#define LCM_MODULE_DOMAIN_RAMDISK           3
+#define LCM_MODULE_CPU_MICROCODE            4
+#define LCM_MODULE_XSM_FLASK_POLICY         5
+};
+
+/* Structure containing cryptographic checksum of a multiboot module */
+struct lcm_module_checksum {
+    uint8_t module_index;
+    uint8_t algorithm;
+/* TODO: declare algorithm identifier enumeration values here */
+    uint16_t hash_len;
+    uint8_t bytes[0];
+};
+
+struct lcm_entry {
+    uint32_t type;
+#define LCM_DATA_IGNORE             0 /* Skip this data */
+#define LCM_DATA_MODULE_TYPES       1 /* Declare multiboot module types */
+#define LCM_DATA_DOMAIN             2 /* Defintion for an initial domain */
+#define LCM_DATA_MODULE_CHECKSUM    3 /* Checksum of a multiboot module */
+
+    /* Length of this lcm_entry struct including the subtype union */
+    uint32_t len;
+
+    union {
+        uint8_t raw[0];
+        struct lcm_module_types module_types;
+        struct lcm_domain domain;
+        struct lcm_module_checksum checksum;
     };
 };
 
@@ -120,5 +157,5 @@ struct lcm_module {
 struct lcm_header_info {
     uint32_t magic_number;
 #define LCM_HEADER_MAGIC_NUMBER 0x4d434c78 /* xLCM */
-    struct lcm_module modules[0];
+    struct lcm_entry entries[0];
 };
