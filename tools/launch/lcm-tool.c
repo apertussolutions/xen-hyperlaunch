@@ -26,11 +26,14 @@
 #define SECINITSID_DOMU    10
 #define SECINITSID_DOMDM   11
 #define SECINITSID_DOMBOOT 12
+/* FIXME: find correct definition source for this: */
+#define MAX_DOMAIN_VCPUS 512
 
 #define MAX_INPUT_FILE_SIZE (1024 * 64) /* in bytes */
 #define MAX_NUMBER_OF_LCM_MODULES 32
 #define MAX_NUMBER_OF_DOMAINS 32
 #define MAX_NUMBER_OF_MULTIBOOT_MODULES 255
+
 
 #define error(format, args...) fprintf(stderr, "Error: " format, ## args )
 
@@ -343,6 +346,11 @@ int get_domain_basic_config(yajl_val j_cfg, struct lcm_domain *domain)
     if ( get_config_memory_size(j_cfg, (const char *[]){ "memory",
                                                          NULL  },
                                 &domain->basic_config.mem_size) )
+        return -EINVAL;
+
+    if ( get_config_uint(j_cfg, (const char *[]){ "cpus", NULL  },
+                         1, MAX_DOMAIN_VCPUS,
+                         &domain->basic_config.cpus) )
         return -EINVAL;
 
     if ( get_config_xsm_sid(j_cfg, (const char *[]){ "xsm_sid", NULL  },

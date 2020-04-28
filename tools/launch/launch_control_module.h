@@ -33,6 +33,9 @@ struct lcm_domain_basic_config {
 
     /* XSM/Flask sid */
     uint32_t xsm_sid;
+
+    /* Initial and maximum number of vCPUs for the domain */
+    uint32_t cpus;
 };
 
 /*
