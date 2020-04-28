@@ -434,7 +434,6 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     unsigned int buf_len;
     unsigned int multiboot_mod_index;
     unsigned char *out_buffer;
-    const char *modules_path[] = {"modules", NULL};
     yajl_val j_modules, j_mod;
 
     debug("generate_launch_control_module\n");
@@ -452,7 +451,8 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     header_info->magic_number = LCM_HEADER_MAGIC_NUMBER;
     out_size = sizeof(struct lcm_header_info);
 
-    j_modules = yajl_tree_get(config_node, modules_path, yajl_t_array);
+    j_modules = yajl_tree_get(config_node, (const char *[]){ "modules", NULL },
+                              yajl_t_array);
 
     if ( !j_modules || !YAJL_IS_ARRAY(j_modules) ||
          YAJL_GET_ARRAY(j_modules)->len > MAX_NUMBER_OF_LCM_MODULES )
