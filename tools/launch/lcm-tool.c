@@ -377,9 +377,16 @@ int get_domain_extended_config(yajl_val j_cfg, struct lcm_domain *domain,
     if ( get_config_string(j_cfg, (const char *[]){ "config", NULL },
                            max_config_len, out_config_len,
                            &domain->extended_config.config_string[0]) )
-        return -1;
+        return -EINVAL;
 
     return 0;
+}
+
+void advance_entry(unsigned int *p_size, struct lcm_entry **p_entry)
+{
+    *p_size += (*p_entry)->len;
+    *p_entry = (struct lcm_entry *)(((uint8_t *)(*p_entry)) + (*p_entry)->len);
+    assert(0 == (((unsigned long)(*p_entry)) & 0x3));
 }
 
 int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
@@ -404,6 +411,14 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     if ( !out_buffer )
         return -ENOMEM;
 
+    if ( ((unsigned long)out_buffer) & 0x1f )
+    {
+        error("output buffer misaligned\n");
+        return -ENOMEM;
+    }
+    debug("out_buffer: %p align: %lu\n", out_buffer,
+          ((unsigned long)out_buffer) & 0x3);
+
     memset(out_buffer, 0, buf_len);
     debug("buffer cleared\n");
 
@@ -422,6 +437,8 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     debug("got modules\n");
 
     entry = &header_info->entries[0]; /* Indexing only valid for 0th module */
+    assert(0 == (((unsigned long)entry) & 0x3));
+
     entry->type = LCM_DATA_MODULE_TYPES;
     entry->module_types.num_modules = YAJL_GET_ARRAY(j_modules)->len;
 
@@ -469,8 +486,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     entry->len = sizeof(struct lcm_entry) +
                  sizeof(struct lcm_module_types) + mod_idx;
 
-    out_size += entry->len;
-    entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    advance_entry(&out_size, &entry);
 
     /* ---- domains ---- */
     j_domains = yajl_tree_get(config_node, (const char *[]){ "domains", NULL },
@@ -537,8 +553,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                          sizeof(struct lcm_domain) +
                          sizeof(struct lcm_domain_basic_config);
 
-            out_size += entry->len;
-            entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+            advance_entry(&out_size, &entry);
         }
 
         /* ---- high priv config ---- */
@@ -565,8 +580,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                          sizeof(struct lcm_domain) +
                          sizeof(struct lcm_domain_high_priv_config);
 
-            out_size += entry->len;
-            entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+            advance_entry(&out_size, &entry);
         }
 
         /* ---- extended config ---- */
@@ -575,7 +589,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                               yajl_t_object);
         if ( j_cfg )
         {
-            unsigned int len_config_string;
+            unsigned int len;
             /* FIXME: a better max_len_config_string here */
             unsigned int max_len_config_string = buf_len
                 - out_size
@@ -587,22 +601,25 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
             ret = get_domain_extended_config(j_cfg, &entry->domain,
                                              max_len_config_string,
-                                             &len_config_string);
+                                             &len);
             if ( ret )
                 return ret;
 
-            debug("extended config string length: %u\n", len_config_string);
+            debug("extended config string length: %u\n", len);
+            entry->domain.extended_config.string_len = len;
+
+            /* pad to align */
+            for ( ; len % 4 != 0; len++ )
+                entry->domain.extended_config.config_string[len] = 0;
 
             entry->type = LCM_DOMAIN_EXTENDED_CONFIG;
             entry->len = sizeof(struct lcm_entry) +
                          sizeof(struct lcm_domain) +
                          sizeof(struct lcm_domain_extended_config) +
-                         len_config_string;
+                         len;
 
-            out_size += entry->len;
-            entry = (struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+            advance_entry(&out_size, &entry);
         }
-
 
         /* TODO: ramdisk */
         /* TODO: microcode */

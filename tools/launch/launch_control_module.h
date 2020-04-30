@@ -57,11 +57,8 @@ struct lcm_domain_high_priv_config {
  * It is provided to the boot domain to apply the configuration.
  */
 struct lcm_domain_extended_config {
-    /*
-     * The length of this string is determined by the len field of the
-     * lcm_entry struct, minus all fixed-length fields in lcm_entry and
-     * lcm_domain.
-     */
+    /* Length of the string in config_string */
+    uint32_t string_len;
     uint8_t config_string[0];
 };
 
