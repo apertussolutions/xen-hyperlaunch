@@ -130,6 +130,17 @@ config HVM_FEP
 
 	  If unsure, say N.
 
+config BOOT_DOMAIN
+	bool "Boot Domain support" if EXPERT = "y"
+	depends on HVM
+	---help---
+	  Enables launch of multiple VMs at host boot as an alternative
+	  method of starting a Xen system. Does not require a dom0.
+
+	  This feature is currently experimental.
+
+	  If unsure, say N.
+
 config TBOOT
 	def_bool y
 	prompt "Xen tboot support" if EXPERT = "y"
