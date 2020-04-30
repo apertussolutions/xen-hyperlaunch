@@ -1799,7 +1799,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
 
     initrdidx = find_first_bit(module_map, mbi->mods_count);
-    if ( bitmap_weight(module_map, mbi->mods_count) > 1 )
+    if ( !boot_domain_enabled &&
+         bitmap_weight(module_map, mbi->mods_count) > 1 )
         printk(XENLOG_WARNING
                "Multiple initrd candidates, picking module #%u\n",
                initrdidx);
