@@ -116,7 +116,7 @@ static s8 __initdata opt_smep = -1;
  * Initial domain place holder. Needs to be global so it can be created in
  * __start_xen and unpaused in init_done.
  */
-static struct domain *__initdata dom0;
+static struct domain *__initdata initial_domain;
 
 static int __init parse_smep_param(const char *s)
 {
@@ -592,7 +592,7 @@ static void noinline init_done(void)
 
     system_state = SYS_STATE_active;
 
-    domain_unpause_by_systemcontroller(dom0);
+    domain_unpause_by_systemcontroller(initial_domain);
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
@@ -732,6 +732,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         .max_maptrack_frames = -1,
     };
     const char *hypervisor_name;
+    struct domain *dom0;
 
     /* Critical region without IDT or TSS.  Any fault is deadly! */
 
@@ -1817,6 +1818,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     dom0 = domain_create(get_initial_domain_id(), &dom0_cfg, !pv_shim);
     if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
         panic("Error creating domain 0\n");
+
+    /* TODO: if ( !launch_control_enabled ) */
+        initial_domain = dom0;
 
     /* Grab the DOM0 command line. */
     cmdline = (char *)(mod[kdom0idx].string ? __va(mod[kdom0idx].string)
