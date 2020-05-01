@@ -55,6 +55,8 @@
 #include <asm/guest.h>
 #include <asm/microcode.h>
 
+#define MAX_MULTIBOOT_MODS_COUNT 8 /* FIXME: move this; see: pvh_mbi_mods */
+
 /* opt_nosmp: If true, secondary processors are ignored. */
 static bool __initdata opt_nosmp;
 boolean_param("nosmp", opt_nosmp);
@@ -681,8 +683,110 @@ static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int li
     return n;
 }
 
-void find_launch_control_module(const module_t *image,
-                                unsigned long image_headroom)
+void populate_module_maps(const multiboot_info_t *mbi,
+                          const module_t *lcm_mod,
+                          unsigned long *module_map_xsm_flask,
+                          unsigned long *module_map_cpu_ucode,
+                          unsigned long *module_map_domain_kernel,
+                          unsigned long *module_map_ramdisk)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    const struct lcm_entry *entry;
+    unsigned int i, consumed;
+    void *lcm_start;
+    const struct lcm_header_info *hdr;
+
+/* REMEMBER: the lcm_data is user-supplied, so validate anything used */
+    consumed = sizeof(struct lcm_header_info);
+
+    lcm_start = bootstrap_map(lcm_mod);
+    hdr = (const struct lcm_header_info *)lcm_start;
+
+#define MAX_LCM_SIZE 4096 /* FIXME */
+#define MIN_LCM_SIZE ( sizeof(struct lcm_header_info) + \
+                       sizeof(struct lcm_entry) * 2  + \
+                       sizeof(struct lcm_module_types) + \
+                       sizeof(struct lcm_domain) )
+    if ( (hdr->total_len > MAX_LCM_SIZE) || (hdr->total_len < MIN_LCM_SIZE) )
+        panic("First multiboot module (LCM) reports invalid data length: %u\n",
+              hdr->total_len);
+    /* TODO: validate it against the mbi size */
+
+    entry = &hdr->entries[0];
+    for ( ; ; )
+    {
+        if ( (entry->len + consumed) > hdr->total_len )
+        {
+            panic("Excess entry length in LCM: (%u + %u) > %u\n",
+                  entry->len, consumed, hdr->total_len);
+        }
+        if ( entry->len & 3 )
+            panic("Misaligned entry length in LCM: %u\n", entry->len);
+
+        if ( entry->type == LCM_DATA_MODULE_TYPES )
+        {
+            /* Validate the number of modules */
+            if ( (sizeof(struct lcm_entry) +
+                  sizeof(struct lcm_module_types) +
+                  entry->module_types.num_modules) > entry->len )
+            {
+                panic("Incorrect LCM field for number of multiboot modules\n");
+            }
+            if ( entry->module_types.num_modules != mbi->mods_count )
+            {
+                printk("WARNING: LCM declared module count (%u) doesn't match "
+                       "number of multiboot modules supplied (%u).\n",
+                       entry->module_types.num_modules, mbi->mods_count);
+            }
+
+            for ( i = 0; i < entry->module_types.num_modules; i++ )
+            {
+                switch ( entry->module_types.types[i] )
+                {
+                case LCM_MODULE_LAUNCH_CONTROL_MODULE:
+                    printk("WARNING: ignoring LCM multiboot module #%u\n",
+                           i + 1);
+                    break;
+
+                case LCM_MODULE_DOMAIN_KERNEL:
+                    __set_bit(i, module_map_domain_kernel);
+                    break;
+
+                case LCM_MODULE_DOMAIN_RAMDISK:
+                    __set_bit(i, module_map_ramdisk);
+                    break;
+
+                case LCM_MODULE_CPU_MICROCODE:
+                    __set_bit(i, module_map_cpu_ucode);
+                    break;
+
+                case LCM_MODULE_XSM_FLASK_POLICY:
+                    __set_bit(i, module_map_xsm_flask);
+                    break;
+
+                default:
+                    printk("WARNING: unknown multiboot module type: %u\n",
+                           entry->module_types.types[i]);
+                case LCM_MODULE_IGNORE:
+                    break;
+                }
+            }
+        }
+
+/* TODO: make sure there's only a single LCM_DATA_MODULE_TYPES entry */
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+    bootstrap_map(NULL);
+#endif
+}
+
+void find_launch_control_module(const module_t *image)
 {
 #ifdef CONFIG_BOOT_DOMAIN
     unsigned long image_len = image->mod_end;
@@ -698,6 +802,8 @@ void find_launch_control_module(const module_t *image,
 
     if ( memcmp(&hdr->magic_number, &lcm_magic_number, 4) == 0 )
     {
+        /* TODO: verify hdr->checksum */
+
         printk("Found Launch Control Module\n");
         boot_domain_enabled = true;
     }
@@ -716,7 +822,18 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     unsigned int kdom0idx = 0, initrdidx, num_parked = 0;
     multiboot_info_t *mbi;
     module_t *mod;
-    unsigned long nr_pages, raw_max_page, modules_headroom, module_map[1];
+    unsigned long nr_pages, raw_max_page;
+#define MODULE_MAP_SZ 1
+    unsigned long module_map[MODULE_MAP_SZ];
+    unsigned long raw_module_map_xsm_flask[MODULE_MAP_SZ];
+    unsigned long raw_module_map_cpu_ucode[MODULE_MAP_SZ];
+    unsigned long raw_module_map_domain_kernel[MODULE_MAP_SZ];
+    unsigned long raw_module_map_ramdisk[MODULE_MAP_SZ];
+    unsigned long *module_map_xsm_flask = raw_module_map_xsm_flask;
+    unsigned long *module_map_cpu_ucode = raw_module_map_cpu_ucode;
+    unsigned long *module_map_domain_kernel = raw_module_map_domain_kernel;
+    unsigned long *module_map_ramdisk = raw_module_map_ramdisk;
+    unsigned long modules_headroom[MAX_MULTIBOOT_MODS_COUNT];
     int i, j, e820_warn = 0, bytes = 0;
     bool acpi_boot_table_init_done = false, relocated = false;
     int ret;
@@ -882,9 +999,10 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         panic("dom0 kernel not specified. Check bootloader configuration\n");
 
     /* Check that we don't have a silly number of modules. */
-    if ( mbi->mods_count > sizeof(module_map) * 8 )
+    ASSERT(MAX_MULTIBOOT_MODS_COUNT <= sizeof(module_map) * 8);
+    if ( mbi->mods_count > MAX_MULTIBOOT_MODS_COUNT )
     {
-        mbi->mods_count = sizeof(module_map) * 8;
+        mbi->mods_count = MAX_MULTIBOOT_MODS_COUNT;
         printk("Excessive multiboot modules - using the first %u only\n",
                mbi->mods_count);
     }
@@ -1036,8 +1154,36 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         mod[mbi->mods_count].mod_end = __2M_rwdata_end - _stext;
     }
 
-    modules_headroom = bzimage_headroom(bootstrap_map(mod), mod->mod_end);
-    bootstrap_map(NULL);
+    find_launch_control_module(mod); /* sets boot_domain_enabled */
+
+    if ( boot_domain_enabled )
+    {
+        populate_module_maps(mbi, mod, module_map_xsm_flask,
+                             module_map_cpu_ucode, module_map_domain_kernel,
+                             module_map_ramdisk);
+
+        for ( i = 0; i < mbi->mods_count; i++ )
+        {
+            /* FIXME: only do this for modules identified as kernels in the LCM */
+            modules_headroom[i] = bzimage_headroom(bootstrap_map(&mod[i]),
+                                                   mod[i].mod_end);
+            bootstrap_map(NULL);
+        }
+    }
+    else
+    {
+        module_map_xsm_flask = module_map;
+        module_map_cpu_ucode = module_map;
+        module_map_domain_kernel = module_map;
+        module_map_ramdisk = module_map;
+
+        modules_headroom[0] = bzimage_headroom(bootstrap_map(mod),
+                                               mod->mod_end);
+        bootstrap_map(NULL);
+
+        for ( i = 1; i < mbi->mods_count ; i++ )
+            modules_headroom[i] = 0;
+    }
 
 #ifndef highmem_start
     /* Don't allow split below 4Gb. */
@@ -1242,7 +1388,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         /* Is the region suitable for relocating the multiboot modules? */
         for ( j = mbi->mods_count - 1; j >= 0; j-- )
         {
-            unsigned long headroom = j ? 0 : modules_headroom;
+            unsigned long headroom = modules_headroom[j];
             unsigned long size = PAGE_ALIGN(headroom + mod[j].mod_end);
 
             if ( mod[j].reserved )
@@ -1290,11 +1436,12 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 #endif
     }
 
-    if ( modules_headroom && !mod->reserved )
-        panic("Not enough memory to relocate the dom0 kernel image\n");
     for ( i = 0; i < mbi->mods_count; ++i )
     {
         uint64_t s = (uint64_t)mod[i].mod_start << PAGE_SHIFT;
+
+        if ( modules_headroom[i] && !mod[i].reserved )
+            panic("Not enough memory to relocate kernel image, mod: %d\n", i);
 
         reserve_e820_ram(&boot_e820, s, s + PAGE_ALIGN(mod[i].mod_end));
     }
@@ -1581,7 +1728,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     mmio_ro_ranges = rangeset_new(NULL, "r/o mmio ranges",
                                   RANGESETF_prettyprint_hex);
 
-    xsm_multiboot_init(module_map, mbi);
+    xsm_multiboot_init(module_map_xsm_flask, mbi);
 
     setup_system_domains();
 
@@ -1633,7 +1780,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     init_IRQ();
 
-    microcode_grab_module(module_map, mbi);
+    microcode_grab_module(module_map_cpu_ucode, mbi);
 
     timer_init();
 
@@ -1773,8 +1920,6 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     init_guest_cpuid();
     init_guest_msr_policy();
 
-    find_launch_control_module(mod, modules_headroom);
-
     if ( boot_domain_enabled )
     {
         /* If we're launching the boot domain, create it first, now. */
@@ -1795,8 +1940,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             panic("Error creating the boot domain\n");
 
         /* TODO: use LCM to locate dom0 multiboot modules, if any */
-        kdom0idx = find_first_bit(module_map, mbi->mods_count);
-        __clear_bit(kdom0idx, module_map);
+        kdom0idx = find_first_bit(module_map_domain_kernel, mbi->mods_count);
+        __clear_bit(kdom0idx, module_map_domain_kernel);
     }
 
     if ( opt_dom0_pvh )
@@ -1856,7 +2001,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
 
-    initrdidx = find_first_bit(module_map, mbi->mods_count);
+    initrdidx = find_first_bit(module_map_ramdisk, mbi->mods_count);
     if ( !boot_domain_enabled &&
          bitmap_weight(module_map, mbi->mods_count) > 1 )
         printk(XENLOG_WARNING
@@ -1882,7 +2027,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
      * We're going to setup domain0 using the module(s) that we stashed safely
      * above our heap. The second module, if present, is an initrd ramdisk.
      */
-    if ( construct_dom0(dom0, &mod[kdom0idx], modules_headroom,
+    if ( construct_dom0(dom0, &mod[kdom0idx], modules_headroom[kdom0idx],
                         (initrdidx > 0) && (initrdidx < mbi->mods_count)
                         ? mod + initrdidx : NULL, cmdline) != 0)
         panic("Could not set up DOM0 guest OS\n");
