@@ -26,6 +26,7 @@
 #include <xen/nodemask.h>
 #include <xen/virtual_region.h>
 #include <xen/watchdog.h>
+#include <public/launch_control_module.h>
 #include <public/version.h>
 #include <compat/platform.h>
 #include <compat/xen.h>
@@ -680,6 +681,31 @@ static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int li
     return n;
 }
 
+void find_launch_control_module(const module_t *image,
+                                unsigned long image_headroom)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    unsigned long image_len = image->mod_end;
+    const uint32_t lcm_magic_number = LCM_HEADER_MAGIC_NUMBER;
+    void *image_start;
+    struct lcm_header_info *hdr;
+
+    if ( image_len < sizeof(struct lcm_header_info) )
+        return;
+
+    image_start = bootstrap_map(image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    if ( memcmp(&hdr->magic_number, &lcm_magic_number, 4) == 0 )
+    {
+        printk("Found Launch Control Module\n");
+        boot_domain_enabled = true;
+    }
+
+    bootstrap_map(NULL);
+#endif
+}
+
 /* How much of the directmap is prebuilt at compile time. */
 #define PREBUILT_MAP_LIMIT (1 << L2_PAGETABLE_SHIFT)
 
@@ -687,7 +713,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 {
     char *memmap_type = NULL;
     char *cmdline, *kextra, *loader;
-    unsigned int initrdidx, num_parked = 0;
+    unsigned int kdom0idx = 0, initrdidx, num_parked = 0;
     multiboot_info_t *mbi;
     module_t *mod;
     unsigned long nr_pages, raw_max_page, modules_headroom, module_map[1];
@@ -706,6 +732,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         .max_maptrack_frames = -1,
     };
     const char *hypervisor_name;
+    struct domain *dom0;
 
     /* Critical region without IDT or TSS.  Any fault is deadly! */
 
@@ -863,7 +890,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     }
 
     bitmap_fill(module_map, mbi->mods_count);
-    __clear_bit(0, module_map); /* Dom0 kernel is always first */
+    __clear_bit(0, module_map); /* first module is always used */
 
     if ( pvh_boot )
     {
@@ -1746,6 +1773,32 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     init_guest_cpuid();
     init_guest_msr_policy();
 
+    find_launch_control_module(mod, modules_headroom);
+
+    if ( boot_domain_enabled )
+    {
+        /* If we're launching the boot domain, create it first, now. */
+        struct xen_domctl_createdomain dom_boot_cfg = {
+            .flags = (IS_ENABLED(CONFIG_TBOOT) ?
+                        XEN_DOMCTL_CDF_s3_integrity : 0) |
+                     (hvm_hap_supported() ? XEN_DOMCTL_CDF_hvm : 0) |
+                     XEN_DOMCTL_CDF_hap,
+            .max_evtchn_port = -1,
+            .max_grant_frames = 1,
+            .max_maptrack_frames = 0,
+            .max_vcpus = 1,
+        };
+
+        initial_domain = domain_create(DOMID_BOOT_DOMAIN, &dom_boot_cfg, false);
+        if ( IS_ERR(initial_domain) ||
+             (alloc_dom0_vcpu0(initial_domain) == NULL) )
+            panic("Error creating the boot domain\n");
+
+        /* TODO: use LCM to locate dom0 multiboot modules, if any */
+        kdom0idx = find_first_bit(module_map, mbi->mods_count);
+        __clear_bit(kdom0idx, module_map);
+    }
+
     if ( opt_dom0_pvh )
     {
         dom0_cfg.flags |= (XEN_DOMCTL_CDF_hvm |
@@ -1761,13 +1814,16 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         dom0_cfg.flags |= XEN_DOMCTL_CDF_iommu;
 
     /* Create initial domain 0. */
-    initial_domain =
-        domain_create(get_initial_domain_id(), &dom0_cfg, !pv_shim);
-    if ( IS_ERR(initial_domain) || (alloc_dom0_vcpu0(initial_domain) == NULL) )
+    dom0 = domain_create(get_initial_domain_id(), &dom0_cfg, !pv_shim);
+    if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
         panic("Error creating domain 0\n");
 
+    /* TODO: if ( !boot_domain_enabled ) */
+        initial_domain = dom0;
+
     /* Grab the DOM0 command line. */
-    cmdline = (char *)(mod[0].string ? __va(mod[0].string) : NULL);
+    cmdline = (char *)(mod[kdom0idx].string ? __va(mod[kdom0idx].string)
+                                            : NULL);
     if ( (cmdline != NULL) || (kextra != NULL) )
     {
         static char __initdata dom0_cmdline[MAX_GUEST_CMDLINE];
@@ -1825,7 +1881,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
      * We're going to setup domain0 using the module(s) that we stashed safely
      * above our heap. The second module, if present, is an initrd ramdisk.
      */
-    if ( construct_dom0(initial_domain, mod, modules_headroom,
+    if ( construct_dom0(dom0, &mod[kdom0idx], modules_headroom,
                         (initrdidx > 0) && (initrdidx < mbi->mods_count)
                         ? mod + initrdidx : NULL, cmdline) != 0)
         panic("Could not set up DOM0 guest OS\n");
@@ -1849,7 +1905,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     dmi_end_boot();
 
-    setup_io_bitmap(initial_domain);
+    setup_io_bitmap(dom0);
 
     if ( bsp_delay_spec_ctrl )
     {
