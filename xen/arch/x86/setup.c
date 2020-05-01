@@ -115,7 +115,7 @@ static s8 __initdata opt_smep = -1;
  * Initial domain place holder. Needs to be global so it can be created in
  * __start_xen and unpaused in init_done.
  */
-static struct domain *__initdata dom0;
+static struct domain *__initdata initial_domain;
 
 static int __init parse_smep_param(const char *s)
 {
@@ -591,7 +591,7 @@ static void noinline init_done(void)
 
     system_state = SYS_STATE_active;
 
-    domain_unpause_by_systemcontroller(dom0);
+    domain_unpause_by_systemcontroller(initial_domain);
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
@@ -1761,8 +1761,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         dom0_cfg.flags |= XEN_DOMCTL_CDF_iommu;
 
     /* Create initial domain 0. */
-    dom0 = domain_create(get_initial_domain_id(), &dom0_cfg, !pv_shim);
-    if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
+    initial_domain =
+        domain_create(get_initial_domain_id(), &dom0_cfg, !pv_shim);
+    if ( IS_ERR(initial_domain) || (alloc_dom0_vcpu0(initial_domain) == NULL) )
         panic("Error creating domain 0\n");
 
     /* Grab the DOM0 command line. */
@@ -1824,7 +1825,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
      * We're going to setup domain0 using the module(s) that we stashed safely
      * above our heap. The second module, if present, is an initrd ramdisk.
      */
-    if ( construct_dom0(dom0, mod, modules_headroom,
+    if ( construct_dom0(initial_domain, mod, modules_headroom,
                         (initrdidx > 0) && (initrdidx < mbi->mods_count)
                         ? mod + initrdidx : NULL, cmdline) != 0)
         panic("Could not set up DOM0 guest OS\n");
@@ -1848,7 +1849,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     dmi_end_boot();
 
-    setup_io_bitmap(dom0);
+    setup_io_bitmap(initial_domain);
 
     if ( bsp_delay_spec_ctrl )
     {
