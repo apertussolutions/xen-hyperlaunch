@@ -50,6 +50,12 @@ struct lcm_domain_high_priv_config {
      */
     uint32_t mode;
 #define LCM_DOMAIN_HIGH_PRIV_MODE_PARAVIRTUALIZED  (1 << 0) /* PV | PVH/HVM */
+
+    /*
+     * Explicit padding so that sizeof(struct lcm_domain_basic_config) ==
+     *                          sizeof(struct lcm_domain_high_priv_config))
+     */
+    uint8_t pad[44];
 };
 
 /*
@@ -62,52 +68,29 @@ struct lcm_domain_extended_config {
     uint8_t config_string[0];
 };
 
-/* Module data pertaining to a domain ramdisk */
-struct lcm_ramdisk {
-    /* TODO */
-};
+struct lcm_domain {
+    /* Flags here indicate which field structs are populated */
+    uint16_t flags;
+#define LCM_DOMAIN_HAS_BASIC_CONFIG      1 << 0
+#define LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG  1 << 1
+#define LCM_DOMAIN_HAS_EXTENDED_CONFIG   1 << 2
 
-/* Module data for a CPU microcode binary */
-struct lcm_microcode {
-    /* For values, see: xen/include/asm-x86/x86-vendors.h */
-    /* TODO: do we need to consider identifiers for ARM CPU vendors? */
-    uint8_t vendor;
-    /* TODO: is the following data required? */
-    uint8_t family;
-    uint8_t model;
-    uint8_t step;
-};
-
-/* Module data pertaining to a XSM/Flask Policy file */
-struct lcm_xsm_flask_policy {
-    /* TODO: Does the LCM need to carry this data? */
-    uint8_t version;
-};
-
-struct lcm_domain_multiboot_modules {
     /* Index of the domain kernel in the multiboot module array */
     uint8_t kernel_index;
-    /* Boolean indicator of ramdisk presence */
-    uint8_t has_ramdisk;
-    /* Index of the domain ramdisk in the multiboot module array */
+    /*
+     * Index of the domain ramdisk in the multiboot module array
+     * or 0 if the domain does not have a ramdisk module.
+     */
     uint8_t ramdisk_index;
-    uint8_t pad;
-};
 
-struct lcm_domain {
-    /* Type of data in this struct describing a multiboot module */
-    uint16_t type;
-#define LCM_DOMAIN_MODULES           1
-#define LCM_DOMAIN_BASIC_CONFIG      2
-#define LCM_DOMAIN_HIGH_PRIV_CONFIG  3
-#define LCM_DOMAIN_EXTENDED_CONFIG   4
-
-    /* Module-type-specific module data */
+    /* Basic and High-Priv config types are mutually exclusive */
     union {
-        uint8_t raw[0];
-        struct lcm_domain_multiboot_modules multiboot_modules;
         struct lcm_domain_basic_config basic_config;
         struct lcm_domain_high_priv_config high_priv_config;
+    };
+    /* The extended config for a domain is optional */
+    union {
+        uint8_t raw[0];
         struct lcm_domain_extended_config extended_config;
     };
 };
@@ -157,5 +140,9 @@ struct lcm_entry {
 struct lcm_header_info {
     uint32_t magic_number;
 #define LCM_HEADER_MAGIC_NUMBER 0x4d434c78 /* xLCM */
+
+    /* Total length of all data, including this header and all entries */
+    uint32_t total_len;
+
     struct lcm_entry entries[0];
 };

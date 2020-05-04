@@ -240,7 +240,7 @@ int get_config_xsm_sid(yajl_val j_mod, const char *key[],
 
 int get_config_uint(yajl_val j_mod, const char *key[],
                     unsigned int min, unsigned int max,
-                    unsigned int *out_int)
+                    unsigned int *out_int, bool required)
 {
     int i;
     unsigned int in_val;
@@ -248,10 +248,13 @@ int get_config_uint(yajl_val j_mod, const char *key[],
     yajl_val j_val = yajl_tree_get(j_mod, key, yajl_t_number);
     if ( !j_val || !YAJL_IS_INTEGER(j_val) )
     {
-        error("missing or invalid value:");
-        for ( i = 0; key[i] != NULL; i++ )
-            fprintf(stderr, " %s", key[i]);
-        fprintf(stderr, "\n");
+        if ( required )
+        {
+            error("missing or invalid value:");
+            for ( i = 0; key[i] != NULL; i++ )
+                fprintf(stderr, " %s", key[i]);
+            fprintf(stderr, "\n");
+        }
 
         return -1;
     }
@@ -350,7 +353,7 @@ int get_domain_basic_config(yajl_val j_cfg, struct lcm_domain *domain)
 
     if ( get_config_uint(j_cfg, (const char *[]){ "cpus", NULL  },
                          1, MAX_DOMAIN_VCPUS,
-                         &domain->basic_config.cpus) )
+                         &domain->basic_config.cpus, true) )
         return -EINVAL;
 
     if ( get_config_xsm_sid(j_cfg, (const char *[]){ "xsm_sid", NULL  },
@@ -400,6 +403,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
     unsigned int dom_idx;
     unsigned int buf_len;
     unsigned int kernel_mb_index;
+    unsigned int ramdisk_mb_index;
     unsigned char *out_buffer;
     yajl_val j_modules, j_domains, j_module_type, j_dom;
 
@@ -500,23 +504,29 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     for ( dom_idx = 0; dom_idx < YAJL_GET_ARRAY(j_domains)->len; dom_idx++ )
     {
-        bool basic_config_found = false;
         yajl_val j_cfg;
 
         j_dom = YAJL_GET_ARRAY(j_domains)->values[dom_idx];
 
+        entry->type = LCM_DATA_DOMAIN;
+        entry->len = sizeof(struct lcm_entry) +
+                     sizeof(struct lcm_domain);
+
+        /* ---- domain fields ---- */
+
+        /* index of the domain kernel multiboot module */
         if ( get_config_uint(j_dom,
                              (const char *[]){ "modules", "kernel", NULL },
                              0, MAX_NUMBER_OF_MULTIBOOT_MODULES,
-                             &kernel_mb_index) )
+                             &kernel_mb_index, true) )
         {
             error("Missing a kernel for domain (%u/%lu)\n", dom_idx+1,
                   YAJL_GET_ARRAY(j_domains)->len);
             return -EINVAL;
         }
 
-        debug("reading domain metadata for dom_idx: %u using kernel %u\n",
-              dom_idx, kernel_mb_index);
+        debug("reading metadata for domain: (%u/%lu) using kernel %u\n",
+              dom_idx+1, YAJL_GET_ARRAY(j_domains)->len,  kernel_mb_index);
 
         /* ---- verify that the indicated module is indeed a kernel */
         if ( kernel_mb_index >= YAJL_GET_ARRAY(j_modules)->len )
@@ -534,6 +544,36 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
                   dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
             return -EINVAL;
         }
+        entry->domain.kernel_index = kernel_mb_index;
+
+        /* index of the domain ramdisk multiboot module */
+        if ( get_config_uint(j_dom,
+                             (const char *[]){ "modules", "ramdisk", NULL },
+                             0, MAX_NUMBER_OF_MULTIBOOT_MODULES,
+                             &ramdisk_mb_index, false) )
+        {
+            debug("domain (%u/%lu): no ramdisk multiboot module specified\n",
+                  dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
+            ramdisk_mb_index = 0;
+        }
+
+        /* ---- verify that the indicated module is indeed a ramdisk */
+        if ( ramdisk_mb_index >= YAJL_GET_ARRAY(j_modules)->len )
+        {
+            error("domain (%u/%lu) ramdisk index invalid\n",
+                  dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
+            return -EINVAL;
+        }
+
+        j_module_type = YAJL_GET_ARRAY(j_modules)->values[kernel_mb_index];
+        if ( !YAJL_IS_STRING(j_module_type) ||
+             strncmp(j_module_type->u.string, "kernel", 7) )
+        {
+            error("domain (%u/%lu) has ramdisk index mismatches module type\n",
+                  dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
+            return -EINVAL;
+        }
+        entry->domain.ramdisk_index = ramdisk_mb_index;
 
         /* ---- basic config ---- */
         j_cfg = yajl_tree_get(j_dom, (const char *[]){"basic_config", NULL},
@@ -546,17 +586,16 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             if ( ret )
                 return ret;
 
-            basic_config_found = true;
-
-            entry->type = LCM_DOMAIN_BASIC_CONFIG;
-            entry->len = sizeof(struct lcm_entry) +
-                         sizeof(struct lcm_domain) +
-                         sizeof(struct lcm_domain_basic_config);
-
-            advance_entry(&out_size, &entry);
+            entry->domain.flags |= LCM_DOMAIN_HAS_BASIC_CONFIG;
         }
 
         /* ---- high priv config ---- */
+        debug("config size: %lu : %lu\n",
+              sizeof(struct lcm_domain_basic_config),
+              sizeof(struct lcm_domain_high_priv_config));
+        assert(sizeof(struct lcm_domain_basic_config) ==
+               sizeof(struct lcm_domain_high_priv_config));
+
         j_cfg = yajl_tree_get(j_dom,
                               (const char *[]){"high_priv_config", NULL},
                               yajl_t_object);
@@ -564,10 +603,10 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         {
             debug("high priv config\n");
 
-            if ( basic_config_found )
+            if ( entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG )
             {
-                error("module #%u has both basic and high priv configs\n",
-                       kernel_mb_index);
+                error("domain #(%u/%lu) has both basic and high priv configs\n",
+                      dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
                 return -EINVAL;
             }
 
@@ -575,12 +614,18 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             if ( ret )
                 return ret;
 
-            entry->type = LCM_DOMAIN_HIGH_PRIV_CONFIG;
-            entry->len = sizeof(struct lcm_entry) +
-                         sizeof(struct lcm_domain) +
-                         sizeof(struct lcm_domain_high_priv_config);
-
-            advance_entry(&out_size, &entry);
+            entry->domain.flags |= LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG;
+        }
+        else
+        {
+            /* require either a basic or high_priv config */
+            if ( !(entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG ) )
+            {
+                error("domain #(%u/%lu) "
+                      "needs either a basic or a high priv config\n",
+                      dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
+                return -EINVAL;
+            }
         }
 
         /* ---- extended config ---- */
@@ -592,11 +637,10 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             unsigned int len;
             /* FIXME: a better max_len_config_string here */
             unsigned int max_len_config_string = buf_len
-                - out_size
-                - sizeof(struct lcm_entry)
-                - sizeof(struct lcm_domain)
-                - sizeof(struct lcm_domain_extended_config);
-
+                                                 - out_size
+                                                 - sizeof(struct lcm_entry)
+                                                 - sizeof(struct lcm_domain)
+                                                 - sizeof(uint32_t);
             debug("extended config\n");
 
             ret = get_domain_extended_config(j_cfg, &entry->domain,
@@ -612,18 +656,12 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
             for ( ; len % 4 != 0; len++ )
                 entry->domain.extended_config.config_string[len] = 0;
 
-            entry->type = LCM_DOMAIN_EXTENDED_CONFIG;
-            entry->len = sizeof(struct lcm_entry) +
-                         sizeof(struct lcm_domain) +
-                         sizeof(struct lcm_domain_extended_config) +
-                         len;
-
-            advance_entry(&out_size, &entry);
+            entry->domain.flags |= LCM_DOMAIN_HAS_EXTENDED_CONFIG;
+            entry->len += sizeof(struct lcm_domain_extended_config) +
+                          len;
         }
 
-        /* TODO: ramdisk */
-        /* TODO: microcode */
-        /* TODO: xsm_flask_policy */
+        advance_entry(&out_size, &entry);
     }
 
     written = fwrite(out_buffer, 1, out_size, file_stream);
