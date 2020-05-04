@@ -144,5 +144,12 @@ struct lcm_header_info {
     /* Total length of all data, including this header and all entries */
     uint32_t total_len;
 
+    /*
+     * A SHA512 checksum of all LCM data, including this header, when calculated
+     * with a zeroed checksum field.
+     */
+#define SHA512_CHECKSUM_SIZE 64
+    uint8_t checksum[SHA512_CHECKSUM_SIZE];
+
     struct lcm_entry entries[0];
 };

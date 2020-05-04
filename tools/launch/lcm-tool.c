@@ -664,6 +664,8 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         advance_entry(&out_size, &entry);
     }
 
+    /* TODO: calculate header_info->checksum and populate it before write */
+
     written = fwrite(out_buffer, 1, out_size, file_stream);
     if ( written < out_size )
     {
