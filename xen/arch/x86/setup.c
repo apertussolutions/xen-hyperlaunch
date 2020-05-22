@@ -1164,10 +1164,14 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
         for ( i = 0; i < mbi->mods_count; i++ )
         {
-            /* FIXME: only do this for modules identified as kernels in the LCM */
-            modules_headroom[i] = bzimage_headroom(bootstrap_map(&mod[i]),
-                                                   mod[i].mod_end);
-            bootstrap_map(NULL);
+            if ( test_bit(i, module_map_domain_kernel) )
+            {
+                modules_headroom[i] = bzimage_headroom(
+                                        bootstrap_map(&mod[i]), mod[i].mod_end);
+                bootstrap_map(NULL);
+            }
+            else
+                modules_headroom[i] = 0;
         }
     }
     else
