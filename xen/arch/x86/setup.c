@@ -805,7 +805,7 @@ void find_launch_control_module(const module_t *image)
         /* TODO: verify hdr->checksum */
 
         printk("Found Launch Control Module\n");
-        boot_domain_enabled = true;
+        launch_control_enabled = true;
     }
 
     bootstrap_map(NULL);
@@ -1154,9 +1154,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         mod[mbi->mods_count].mod_end = __2M_rwdata_end - _stext;
     }
 
-    find_launch_control_module(mod); /* sets boot_domain_enabled */
+    find_launch_control_module(mod); /* sets launch_control_enabled */
 
-    if ( boot_domain_enabled )
+    if ( launch_control_enabled )
     {
         populate_module_maps(mbi, mod, module_map_xsm_flask,
                              module_map_cpu_ucode, module_map_domain_kernel,
@@ -1924,7 +1924,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     init_guest_cpuid();
     init_guest_msr_policy();
 
-    if ( boot_domain_enabled )
+    if ( launch_control_enabled )
     {
         /* If we're launching the boot domain, create it first, now. */
         struct xen_domctl_createdomain dom_boot_cfg = {
@@ -1968,7 +1968,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
         panic("Error creating domain 0\n");
 
-    /* TODO: if ( !boot_domain_enabled ) */
+    /* TODO: if ( !launch_control_enabled ) */
         initial_domain = dom0;
 
     /* Grab the DOM0 command line. */
@@ -2006,7 +2006,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
 
     initrdidx = find_first_bit(module_map_ramdisk, mbi->mods_count);
-    if ( !boot_domain_enabled &&
+    if ( !launch_control_enabled &&
          bitmap_weight(module_map, mbi->mods_count) > 1 )
         printk(XENLOG_WARNING
                "Multiple initrd candidates, picking module #%u\n",

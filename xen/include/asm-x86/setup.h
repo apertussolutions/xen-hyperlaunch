@@ -58,9 +58,9 @@ extern unsigned long highmem_start;
 extern int8_t opt_smt;
 
 #ifdef CONFIG_BOOT_DOMAIN
-extern bool boot_domain_enabled;
+extern bool launch_control_enabled;
 #else
-#define boot_domain_enabled false
+#define launch_control_enabled false
 #endif
 #ifdef CONFIG_SHADOW_PAGING
 extern bool opt_dom0_shadow;

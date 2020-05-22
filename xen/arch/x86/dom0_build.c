@@ -252,7 +252,7 @@ struct vcpu *__init alloc_dom0_vcpu0(struct domain *dom0)
 }
 
 #ifdef CONFIG_BOOT_DOMAIN
-bool __initdata boot_domain_enabled;
+bool __initdata launch_control_enabled;
 #endif
 #ifdef CONFIG_SHADOW_PAGING
 bool __initdata opt_dom0_shadow;
