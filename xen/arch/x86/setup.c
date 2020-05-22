@@ -702,16 +702,6 @@ void populate_module_maps(const multiboot_info_t *mbi,
     lcm_start = bootstrap_map(lcm_mod);
     hdr = (const struct lcm_header_info *)lcm_start;
 
-#define MAX_LCM_SIZE 4096 /* FIXME */
-#define MIN_LCM_SIZE ( sizeof(struct lcm_header_info) + \
-                       sizeof(struct lcm_entry) * 2  + \
-                       sizeof(struct lcm_module_types) + \
-                       sizeof(struct lcm_domain) )
-    if ( (hdr->total_len > MAX_LCM_SIZE) || (hdr->total_len < MIN_LCM_SIZE) )
-        panic("First multiboot module (LCM) reports invalid data length: %u\n",
-              hdr->total_len);
-    /* TODO: validate it against the mbi size */
-
     entry = &hdr->entries[0];
     for ( ; ; )
     {
@@ -786,6 +776,84 @@ void populate_module_maps(const multiboot_info_t *mbi,
 #endif
 }
 
+#ifdef CONFIG_BOOT_DOMAIN
+void validate_launch_control_module(const struct lcm_header_info *hdr)
+{
+    const struct lcm_entry *entry;
+    unsigned int consumed;
+    bool has_boot_domain = false, has_high_priv_domain = false,
+         has_hardware_domain = false;
+
+#define MAX_LCM_SIZE 4096 /* FIXME */
+#define MIN_LCM_SIZE ( sizeof(struct lcm_header_info) + \
+                       sizeof(struct lcm_entry) * 2  + \
+                       sizeof(struct lcm_module_types) + \
+                       sizeof(struct lcm_domain) )
+    if ( (hdr->total_len > MAX_LCM_SIZE) || (hdr->total_len < MIN_LCM_SIZE) )
+        panic("First multiboot module (LCM) reports invalid data length: %u\n",
+              hdr->total_len);
+    /* TODO: validate it against the mbi size */
+
+    /* Enforce either:
+     * a) there is a single boot domain, and a single hardware domain
+     * or
+     * b) there is a single high_priv domain (ie. a classic "dom0")
+     */
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( ; ; )
+    {
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        if ( (entry->len + consumed) > hdr->total_len )
+        {
+            panic("Excess entry length in LCM: (%u + %u) > %u\n",
+                  entry->len, consumed, hdr->total_len);
+        }
+        if ( entry->len & 3 )
+            panic("Misaligned entry length in LCM: %u\n", entry->len);
+
+        if ( entry->type == LCM_DATA_DOMAIN )
+        {
+            if ( entry->domain.flags | LCM_DOMAIN_HAS_BASIC_CONFIG )
+            {
+                if ( entry->domain.basic_config.functions |
+                        LCM_DOMAIN_FUNCTION_BOOT )
+                {
+                    if ( has_boot_domain )
+                        panic("Multiple boot domains defined in LCM\n");
+
+                    has_boot_domain = true;
+                }
+
+                if ( entry->domain.basic_config.permissions |
+                        LCM_DOMAIN_PERMISSION_HARDWARE )
+                {
+                    if ( has_hardware_domain )
+                        panic("Multiple hardware domains defined in LCM\n");
+
+                    has_hardware_domain = true;
+                }
+            }
+            else if ( entry->domain.flags | LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG )
+            {
+                if ( has_high_priv_domain )
+                    panic("Multiple high privilege domains defined in LCM\n");
+
+                has_high_priv_domain = true;
+            }
+        }
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+    if ( !has_high_priv_domain && !(has_boot_domain && has_hardware_domain) )
+        panic("LCM missing either: boot dom + hw dom; or high priv dom\n");
+}
+#endif
+
 void find_launch_control_module(const module_t *image)
 {
 #ifdef CONFIG_BOOT_DOMAIN
@@ -806,6 +874,8 @@ void find_launch_control_module(const module_t *image)
 
         printk("Found Launch Control Module\n");
         launch_control_enabled = true;
+
+        validate_launch_control_module(hdr);
     }
 
     bootstrap_map(NULL);
