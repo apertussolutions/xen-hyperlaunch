@@ -132,6 +132,7 @@ config HVM_FEP
 
 config BOOT_DOMAIN
 	bool "Boot Domain support" if EXPERT = "y"
+	default y
 	depends on HVM
 	---help---
 	  Enables launch of multiple VMs at host boot as an alternative
