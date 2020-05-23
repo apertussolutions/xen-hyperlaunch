@@ -5,7 +5,9 @@
 
 #include <asm/setup.h>
 
-int construct_pvh_boot_domain(struct domain *d, const module_t *image,
+int construct_pvh_boot_domain(struct domain *d,
+                              const module_t *lcm_image,
+                              const module_t *kernel_image,
                               unsigned long image_headroom,
                               const module_t *initrd,
                               const char *cmdline);

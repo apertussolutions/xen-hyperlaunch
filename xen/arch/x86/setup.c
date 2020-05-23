@@ -2238,7 +2238,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         /* TODO: investigate use of alternative cmdline obtained from the LCM */
 
         if ( construct_boot_domain(
-                initial_domain, &mod[boot_dom_kernel_idx],
+                initial_domain, mod, &mod[boot_dom_kernel_idx],
                 modules_headroom[boot_dom_kernel_idx],
                 (boot_dom_ramdisk_idx > 0) &&
                     (boot_dom_ramdisk_idx < mbi->mods_count) ?
