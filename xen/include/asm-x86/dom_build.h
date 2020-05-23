@@ -1,0 +1,23 @@
+#ifndef _DOM_BUILD_H_
+#define _DOM_BUILD_H_
+
+#include <xen/sched.h>
+
+#include <asm/setup.h>
+
+int construct_pvh_boot_domain(struct domain *d, const module_t *image,
+                              unsigned long image_headroom,
+                              const module_t *initrd,
+                              const char *cmdline);
+
+#endif	/* _DOM_BUILD_H_ */
+
+/*
+ * Local variables:
+ * mode: C
+ * c-file-style: "BSD"
+ * c-basic-offset: 4
+ * tab-width: 4
+ * indent-tabs-mode: nil
+ * End:
+ */

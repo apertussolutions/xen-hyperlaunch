@@ -2212,6 +2212,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
 
+    /* TODO: do domain_create for the remaining initial domains */
+
     /*
      * Temporarily clear SMAP in CR4 to allow user-accesses in construct_dom0().
      * This saves a large number of corner cases interactions with
@@ -2227,6 +2229,24 @@ void __init noreturn __start_xen(unsigned long mbi_p)
            cpu_has_nx ? XENLOG_INFO : XENLOG_WARNING "Warning: ",
            cpu_has_nx ? "" : "not ");
 
+    if ( has_boot_domain )
+    {
+        const char *boot_dom_cmdline =
+            (const char *)(mod[boot_dom_kernel_idx].string ?
+                           __va(mod[boot_dom_kernel_idx].string) : NULL);
+
+        /* TODO: investigate use of alternative cmdline obtained from the LCM */
+
+        if ( construct_boot_domain(
+                initial_domain, &mod[boot_dom_kernel_idx],
+                modules_headroom[boot_dom_kernel_idx],
+                (boot_dom_ramdisk_idx > 0) &&
+                    (boot_dom_ramdisk_idx < mbi->mods_count) ?
+                                           mod + boot_dom_ramdisk_idx : NULL,
+                boot_dom_cmdline) != 0 )
+            panic("Could not set up boot domain guest OS\n");
+    }
+
     if ( has_high_priv_domain || !launch_control_enabled )
     {
         /*
@@ -2241,6 +2261,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                             cmdline) != 0)
             panic("Could not set up DOM0 guest OS\n");
     }
+
+    /* TODO: loop constructing the remaining initial domains */
 
     if ( cpu_has_smap )
     {
