@@ -26,6 +26,7 @@ obj-bin-y += dmi_scan.init.o
 obj-y += domctl.o
 obj-y += domain.o
 obj-bin-y += dom0_build.init.o
+obj-bin-y += dom_build.init.o
 obj-y += domain_page.o
 obj-y += e820.o
 obj-y += emul-i8254.o
