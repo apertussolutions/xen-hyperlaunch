@@ -777,13 +777,15 @@ void populate_module_maps(const multiboot_info_t *mbi,
 #endif
 }
 
+static bool __initdata has_boot_domain = false;
 #ifdef CONFIG_BOOT_DOMAIN
+static bool __initdata has_high_priv_domain = false;
+static bool __initdata has_hardware_domain = false;
+
 void validate_launch_control_module(const struct lcm_header_info *hdr)
 {
     const struct lcm_entry *entry;
     unsigned int consumed;
-    bool has_boot_domain = false, has_high_priv_domain = false,
-         has_hardware_domain = false;
 
 #define MAX_LCM_SIZE 4096 /* FIXME */
 #define MIN_LCM_SIZE ( sizeof(struct lcm_header_info) + \
@@ -887,6 +889,73 @@ void find_launch_control_module(const module_t *image)
 #endif
 }
 
+static inline bool check_multiboot_indices(unsigned long k_idx,
+                                           unsigned long r_idx,
+                                           unsigned long mods_count,
+                                       unsigned long *module_map_domain_kernel,
+                                       unsigned long *module_map_ramdisk)
+{
+    /* 0th module is the LCM, so 0 index indicates absence. */
+
+    if ( !k_idx || (k_idx >= mods_count) ||
+         !test_bit(k_idx, module_map_domain_kernel) )
+        return false;
+
+    if ( (r_idx > 0) && ((r_idx >= mods_count) ||
+                        !test_bit(r_idx, module_map_ramdisk)) )
+            return false;
+
+    return true;
+}
+
+bool find_boot_domain_modules(const module_t *image,
+                              unsigned long *module_map_domain_kernel,
+                              unsigned long *module_map_ramdisk,
+                              unsigned int mods_count,
+                              unsigned int *p_k_idx, unsigned int *p_r_idx)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    void *image_start;
+    struct lcm_header_info *hdr;
+    const struct lcm_entry *entry;
+    unsigned int consumed;
+
+    image_start = bootstrap_map(image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( ; ; )
+    {
+        if ( (entry->type == LCM_DATA_DOMAIN) &&
+             (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) &&
+             (entry->domain.basic_config.functions & LCM_DOMAIN_FUNCTION_BOOT) )
+        {
+            unsigned int k_idx = entry->domain.kernel_index;
+            unsigned int r_idx = entry->domain.ramdisk_index;
+
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
+                return false;
+
+            *p_r_idx = r_idx;
+            *p_k_idx = k_idx;
+
+            return true;
+        }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+#endif
+    return false;
+}
+
 /* How much of the directmap is prebuilt at compile time. */
 #define PREBUILT_MAP_LIMIT (1 << L2_PAGETABLE_SHIFT)
 
@@ -894,7 +963,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 {
     char *memmap_type = NULL;
     char *cmdline, *kextra, *loader;
-    unsigned int kdom0idx = 0, initrdidx, num_parked = 0;
+    unsigned int kdom0idx = 0, initrdidx;
+    unsigned int boot_dom_kernel_idx = 0, boot_dom_ramdisk_idx = 0;
+    unsigned int num_parked = 0;
     multiboot_info_t *mbi;
     module_t *mod;
     unsigned long nr_pages, raw_max_page;
@@ -1999,7 +2070,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     init_guest_cpuid();
     init_guest_msr_policy();
 
-    if ( launch_control_enabled )
+    if ( has_boot_domain )
     {
         /* If we're launching the boot domain, create it first, now. */
         struct xen_domctl_createdomain dom_boot_cfg = {
@@ -2019,9 +2090,11 @@ void __init noreturn __start_xen(unsigned long mbi_p)
              (alloc_dom0_vcpu0(initial_domain) == NULL) )
             panic("Error creating the boot domain\n");
 
-        /* TODO: use LCM to locate dom0 multiboot modules, if any */
-        kdom0idx = find_first_bit(module_map_domain_kernel, mbi->mods_count);
-        __clear_bit(kdom0idx, module_map_domain_kernel);
+        if ( !find_boot_domain_modules(mod, module_map_domain_kernel,
+                                       module_map_ramdisk, mbi->mods_count,
+                                       &boot_dom_kernel_idx,
+                                       &boot_dom_ramdisk_idx) )
+            panic("Could not locate boot domain kernel multiboot module(s)\n");
     }
 
     if ( opt_dom0_pvh )
