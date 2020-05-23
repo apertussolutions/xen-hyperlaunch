@@ -778,8 +778,8 @@ void populate_module_maps(const multiboot_info_t *mbi,
 }
 
 static bool __initdata has_boot_domain = false;
-#ifdef CONFIG_BOOT_DOMAIN
 static bool __initdata has_high_priv_domain = false;
+#ifdef CONFIG_BOOT_DOMAIN
 static bool __initdata has_hardware_domain = false;
 
 void validate_launch_control_module(const struct lcm_header_info *hdr)
@@ -956,6 +956,54 @@ bool find_boot_domain_modules(const module_t *image,
     return false;
 }
 
+/* TODO: refactor common code with find_boot_domain_modules */
+bool find_dom0_modules(const module_t *image,
+                       unsigned long *module_map_domain_kernel,
+                       unsigned long *module_map_ramdisk,
+                       unsigned int mods_count,
+                       unsigned int *p_k_idx, unsigned int *p_r_idx)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    void *image_start;
+    struct lcm_header_info *hdr;
+    const struct lcm_entry *entry;
+    unsigned int consumed;
+
+    image_start = bootstrap_map(image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( ; ; )
+    {
+        if ( (entry->type == LCM_DATA_DOMAIN) &&
+             (entry->domain.flags & LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG) )
+        {
+            unsigned int k_idx = entry->domain.kernel_index;
+            unsigned int r_idx = entry->domain.ramdisk_index;
+
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
+                return false;
+
+            *p_r_idx = r_idx;
+            *p_k_idx = k_idx;
+
+            return true;
+        }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+#endif
+    return false;
+}
+
 /* How much of the directmap is prebuilt at compile time. */
 #define PREBUILT_MAP_LIMIT (1 << L2_PAGETABLE_SHIFT)
 
@@ -963,7 +1011,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 {
     char *memmap_type = NULL;
     char *cmdline, *kextra, *loader;
-    unsigned int kdom0idx = 0, initrdidx;
+    unsigned int dom0_kernel_idx = 0, dom0_ramdisk_idx = 0;
     unsigned int boot_dom_kernel_idx = 0, boot_dom_ramdisk_idx = 0;
     unsigned int num_parked = 0;
     multiboot_info_t *mbi;
@@ -995,7 +1043,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         .max_maptrack_frames = -1,
     };
     const char *hypervisor_name;
-    struct domain *dom0;
+    struct domain *dom0 = NULL; /* faulty compiler maybe-uninitialized */
 
     /* Critical region without IDT or TSS.  Any fault is deadly! */
 
@@ -2111,55 +2159,67 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( iommu_enabled )
         dom0_cfg.flags |= XEN_DOMCTL_CDF_iommu;
 
-    /* Create initial domain 0. */
-    dom0 = domain_create((pv_shim ? get_pv_shim_domain_id() : 0),
-                         &dom0_cfg, !pv_shim);
-    if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
-        panic("Error creating domain 0\n");
-
-    /* TODO: if ( !launch_control_enabled ) */
-        initial_domain = dom0;
-
-    /* Grab the DOM0 command line. */
-    cmdline = (char *)(mod[kdom0idx].string ? __va(mod[kdom0idx].string)
-                                            : NULL);
-    if ( (cmdline != NULL) || (kextra != NULL) )
+    if ( has_high_priv_domain || !launch_control_enabled )
     {
-        static char __initdata dom0_cmdline[MAX_GUEST_CMDLINE];
+        /* Create initial domain 0. */
+        dom0 = domain_create((pv_shim ? get_pv_shim_domain_id() : 0),
+                             &dom0_cfg, !pv_shim);
+        if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
+            panic("Error creating domain 0\n");
 
-        cmdline = cmdline_cook(cmdline, loader);
-        safe_strcpy(dom0_cmdline, cmdline);
+        if ( !has_boot_domain )
+            initial_domain = dom0;
 
-        if ( kextra != NULL )
-            /* kextra always includes exactly one leading space. */
-            safe_strcat(dom0_cmdline, kextra);
+        if ( launch_control_enabled &&
+             !find_dom0_modules(mod, module_map_domain_kernel,
+                                module_map_ramdisk, mbi->mods_count,
+                                &dom0_kernel_idx, &dom0_ramdisk_idx) )
+            panic("Could not locate dom0 multiboot modules\n");
 
-        /* Append any extra parameters. */
-        if ( skip_ioapic_setup && !strstr(dom0_cmdline, "noapic") )
-            safe_strcat(dom0_cmdline, " noapic");
-        if ( (strlen(acpi_param) == 0) && acpi_disabled )
+        /* Grab the DOM0 command line. */
+        cmdline = (char *)(mod[dom0_kernel_idx].string ?
+                           __va(mod[dom0_kernel_idx].string) : NULL);
+        if ( (cmdline != NULL) || (kextra != NULL) )
         {
-            printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
-            safe_strcpy(acpi_param, "off");
-        }
-        if ( (strlen(acpi_param) != 0) && !strstr(dom0_cmdline, "acpi=") )
-        {
-            safe_strcat(dom0_cmdline, " acpi=");
-            safe_strcat(dom0_cmdline, acpi_param);
+            static char __initdata dom0_cmdline[MAX_GUEST_CMDLINE];
+
+            cmdline = cmdline_cook(cmdline, loader);
+            safe_strcpy(dom0_cmdline, cmdline);
+
+            if ( kextra != NULL )
+                /* kextra always includes exactly one leading space. */
+                safe_strcat(dom0_cmdline, kextra);
+
+            /* Append any extra parameters. */
+            if ( skip_ioapic_setup && !strstr(dom0_cmdline, "noapic") )
+                safe_strcat(dom0_cmdline, " noapic");
+            if ( (strlen(acpi_param) == 0) && acpi_disabled )
+            {
+                printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
+                safe_strcpy(acpi_param, "off");
+            }
+            if ( (strlen(acpi_param) != 0) && !strstr(dom0_cmdline, "acpi=") )
+            {
+                safe_strcat(dom0_cmdline, " acpi=");
+                safe_strcat(dom0_cmdline, acpi_param);
+            }
+
+            cmdline = dom0_cmdline;
         }
 
-        cmdline = dom0_cmdline;
+        if ( !launch_control_enabled )
+        {
+            dom0_ramdisk_idx = find_first_bit(module_map_ramdisk,
+                                              mbi->mods_count);
+            if ( bitmap_weight(module_map, mbi->mods_count) > 1 )
+                printk(XENLOG_WARNING
+                       "Multiple initrd candidates, picking module #%u\n",
+                       dom0_ramdisk_idx);
+        }
     }
 
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
-
-    initrdidx = find_first_bit(module_map_ramdisk, mbi->mods_count);
-    if ( !launch_control_enabled &&
-         bitmap_weight(module_map, mbi->mods_count) > 1 )
-        printk(XENLOG_WARNING
-               "Multiple initrd candidates, picking module #%u\n",
-               initrdidx);
 
     /*
      * Temporarily clear SMAP in CR4 to allow user-accesses in construct_dom0().
@@ -2176,14 +2236,20 @@ void __init noreturn __start_xen(unsigned long mbi_p)
            cpu_has_nx ? XENLOG_INFO : XENLOG_WARNING "Warning: ",
            cpu_has_nx ? "" : "not ");
 
-    /*
-     * We're going to setup domain0 using the module(s) that we stashed safely
-     * above our heap. The second module, if present, is an initrd ramdisk.
-     */
-    if ( construct_dom0(dom0, &mod[kdom0idx], modules_headroom[kdom0idx],
-                        (initrdidx > 0) && (initrdidx < mbi->mods_count)
-                        ? mod + initrdidx : NULL, cmdline) != 0)
-        panic("Could not set up DOM0 guest OS\n");
+    if ( has_high_priv_domain || !launch_control_enabled )
+    {
+        /*
+         * We're going to setup domain0 using the module(s) that we stashed
+         * safely above our heap.
+         */
+        if ( construct_dom0(dom0, &mod[dom0_kernel_idx],
+                            modules_headroom[dom0_kernel_idx],
+                            (dom0_ramdisk_idx > 0) &&
+                                (dom0_ramdisk_idx < mbi->mods_count) ?
+                                    mod + dom0_ramdisk_idx : NULL,
+                            cmdline) != 0)
+            panic("Could not set up DOM0 guest OS\n");
+    }
 
     if ( cpu_has_smap )
     {
