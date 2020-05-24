@@ -207,10 +207,11 @@ int __init construct_pvh_boot_domain(struct domain *d,
                                      const module_t *kernel_image,
                                      unsigned long image_headroom,
                                      const module_t *initrd,
-                                     const char *cmdline)
+                                     char *cmdline)
 {
     int rc;
     const struct lcm_domain_basic_config *boot_domain_cfg;
+    paddr_t entry, start_info;
 
     printk(XENLOG_INFO "*** Building PVH Boot Domain ***\n");
 
@@ -230,7 +231,15 @@ int __init construct_pvh_boot_domain(struct domain *d,
         return rc;
     }
 
-    /* TODO: load kernel */
+    rc = pvh_load_kernel(d, kernel_image, image_headroom, initrd,
+                         bootstrap_map(kernel_image),
+                         cmdline, &entry, &start_info);
+    if ( rc )
+    {
+        printk("Failed to load boot domain kernel\n");
+        return rc;
+    }
+
     /* TODO: setup CPUs */
     /* TODO: setup ACPI */
 
