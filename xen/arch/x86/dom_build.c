@@ -1,18 +1,23 @@
 /******************************************************************************
  * dom_build.c
- * 
+ *
  * Copyright (c) 2020, Star Lab Corp
  */
 
 #include <xen/init.h>
+#include <xen/lib.h>
+#include <xen/softirq.h>
 
 #include <asm/dom_build.h>
 #include <asm/setup.h>
 
-int __init construct_boot_domain(struct domain *d, const module_t *image,
+int __init construct_boot_domain(struct domain *d,
+                                 const module_t *lcm,
+                                 const module_t *kernel,
                                  unsigned long image_headroom,
                                  const module_t *initrd, char *cmdline)
 {
+#ifdef CONFIG_BOOT_DOMAIN
     int rc;
 
     /* Sanity! */
@@ -23,7 +28,8 @@ int __init construct_boot_domain(struct domain *d, const module_t *image,
     process_pending_softirqs();
 
     if ( is_hvm_domain(d) )
-        rc = construct_pvh_boot_domain(d, image, image_headroom, initrd, cmdline);
+        rc = construct_pvh_boot_domain(d, lcm, kernel, image_headroom, initrd,
+                                       cmdline);
     else if ( is_pv_domain(d) )
         panic("Cannot construct a PV boot domain\n");
     else
@@ -34,7 +40,9 @@ int __init construct_boot_domain(struct domain *d, const module_t *image,
 
     /* Sanity! */
     BUG_ON(!d->vcpu[0]->is_initialised);
-
+#else
+    ASSERT_UNREACHABLE();
+#endif
     return 0;
 }
 

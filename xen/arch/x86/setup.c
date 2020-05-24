@@ -778,9 +778,9 @@ void populate_module_maps(const multiboot_info_t *mbi,
 
 static bool __initdata has_boot_domain = false;
 static bool __initdata has_high_priv_domain = false;
+#ifdef CONFIG_BOOT_DOMAIN
 static bool __initdata has_hardware_domain = false;
 
-#ifdef CONFIG_BOOT_DOMAIN
 void validate_launch_control_module(const struct lcm_header_info *hdr)
 {
     const struct lcm_entry *entry;
@@ -2231,9 +2231,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     if ( has_boot_domain )
     {
-        const char *boot_dom_cmdline =
-            (const char *)(mod[boot_dom_kernel_idx].string ?
-                           __va(mod[boot_dom_kernel_idx].string) : NULL);
+        char *boot_dom_cmdline =
+            (char *)(mod[boot_dom_kernel_idx].string ?
+                     __va(mod[boot_dom_kernel_idx].string) : NULL);
 
         /* TODO: investigate use of alternative cmdline obtained from the LCM */
 
