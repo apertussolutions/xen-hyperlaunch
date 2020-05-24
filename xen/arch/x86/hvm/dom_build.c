@@ -26,7 +26,7 @@
 #include <public/hvm/e820.h>
 
 #include <asm/dom_build.h>
-#include <asm/dom0_build.h> /* FIXME: for dom0_paging_pages */
+#include <asm/dom0_build.h> /* FIXME: for dom0_paging_pages, pvh_populate_memory_range */
 #include <asm/page.h>
 #include <asm/paging.h>
 #include <asm/setup.h>
@@ -179,6 +179,29 @@ static void __init boot_domain_init_p2m(struct domain *d,
     } while ( preempted );
 }
 
+static int __init boot_domain_populate_p2m(struct domain *d)
+{
+    unsigned int i;
+    int rc;
+
+    for ( i = 0; i < d->arch.nr_e820; i++ )
+    {
+        unsigned long addr, size;
+
+        if ( d->arch.e820[i].type != E820_RAM )
+            continue;
+
+        addr = PFN_DOWN(d->arch.e820[i].addr);
+        size = PFN_DOWN(d->arch.e820[i].size);
+
+        rc = pvh_populate_memory_range(d, addr, size);
+        if ( rc )
+            return rc;
+    }
+
+    return 0;
+}
+
 int __init construct_pvh_boot_domain(struct domain *d,
                                      const module_t *lcm_image,
                                      const module_t *kernel_image,
@@ -186,7 +209,7 @@ int __init construct_pvh_boot_domain(struct domain *d,
                                      const module_t *initrd,
                                      const char *cmdline)
 {
-    /*int rc;*/
+    int rc;
     const struct lcm_domain_basic_config *boot_domain_cfg;
 
     printk(XENLOG_INFO "*** Building PVH Boot Domain ***\n");
@@ -199,13 +222,13 @@ int __init construct_pvh_boot_domain(struct domain *d,
 
     /* boot domain has no iommu access, so no init for that here */
 
-    /* TODO: rc = pvh_populate_p2m(d);
+    rc = boot_domain_populate_p2m(d);
     if ( rc )
     {
         printk("Failed to setup boot domain physical memory map\n");
         bootstrap_map(NULL);
         return rc;
-    }*/
+    }
 
     /* TODO: load kernel */
     /* TODO: setup CPUs */
