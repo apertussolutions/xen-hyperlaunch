@@ -3343,6 +3343,16 @@ void __init sched_setup_dom0_vcpus(struct domain *d)
 
     domain_update_node_affinity(d);
 }
+
+void __init sched_setup_boot_domain_vcpu(struct domain *d)
+{
+    /* boot domain intentionally only has a single VCPU */
+
+    sched_set_affinity(d->vcpu[0]->sched_unit,
+                       cpumask_of(0), cpumask_of(0));
+
+    domain_update_node_affinity(d);
+}
 #endif
 
 #ifdef CONFIG_COMPAT
