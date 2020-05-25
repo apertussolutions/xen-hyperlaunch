@@ -417,7 +417,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     if ( ((unsigned long)out_buffer) & 0x1f )
     {
-        error("output buffer misaligned\n");
+        error("output buffer misaligned: %p\n", out_buffer);
         return -ENOMEM;
     }
     debug("out_buffer: %p align: %lu\n", out_buffer,
