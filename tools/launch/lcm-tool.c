@@ -409,24 +409,26 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     debug("generate_launch_control_module\n");
 
-    buf_len = 4096; /* FIXME */
+    buf_len = 4096 + 0x20; /* FIXME */
 
     out_buffer = malloc(buf_len);
     if ( !out_buffer )
         return -ENOMEM;
 
-    if ( ((unsigned long)out_buffer) & 0x1f )
-    {
-        error("output buffer misaligned: %p\n", out_buffer);
-        return -ENOMEM;
-    }
     debug("out_buffer: %p align: %lu\n", out_buffer,
           ((unsigned long)out_buffer) & 0x3);
 
     memset(out_buffer, 0, buf_len);
     debug("buffer cleared\n");
 
-    header_info = (struct lcm_header_info *)out_buffer;
+    header_info = (struct lcm_header_info *)(out_buffer +
+            (0x20-((unsigned int)out_buffer & 0x1f)));
+    if ( ((unsigned long)header_info) & 0x1f )
+    {
+        error("output buffer misaligned: %p\n", header_info);
+        return -ENOMEM;
+    }
+
     header_info->magic_number = LCM_HEADER_MAGIC_NUMBER;
     out_size = sizeof(struct lcm_header_info);
 
@@ -666,7 +668,7 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
     /* TODO: calculate header_info->checksum and populate it before write */
 
-    written = fwrite(out_buffer, 1, out_size, file_stream);
+    written = fwrite(header_info, 1, out_size, file_stream);
     if ( written < out_size )
     {
         fprintf(stderr, "Error writing out the launch control module\n");
