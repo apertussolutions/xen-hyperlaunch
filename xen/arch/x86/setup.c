@@ -2191,9 +2191,13 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         };
 
         initial_domain = domain_create(DOMID_BOOT_DOMAIN, &dom_boot_cfg, false);
-        if ( IS_ERR(initial_domain) ||
-             (alloc_dom0_vcpu0(initial_domain) == NULL) )
+        if ( IS_ERR(initial_domain) )
             panic("Error creating the boot domain\n");
+
+        initial_domain->node_affinity = node_online_map;
+        initial_domain->auto_node_affinity = 1;
+        if ( vcpu_create(initial_domain, 0) == NULL )
+            panic("Error setting VCPU0 for the boot domain\n");
 
         if ( !find_boot_domain_modules(mod, module_map_domain_kernel,
                                        module_map_ramdisk, mbi->mods_count,
