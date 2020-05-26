@@ -1191,9 +1191,9 @@ void panic(const char *fmt, ...)
         printk("Manual reset required ('noreboot' specified)\n");
     else
 #ifdef CONFIG_X86
-        printk("%s in five seconds...\n", pv_shim ? "Crash" : "Reboot");
+        printk("%s in fifteen seconds...\n", pv_shim ? "Crash" : "Reboot");
 #else
-        printk("Reboot in five seconds...\n");
+        printk("Reboot in fifteen seconds...\n");
 #endif
 
     spin_unlock_irqrestore(&lock, flags);
@@ -1205,7 +1205,7 @@ void panic(const char *fmt, ...)
     if ( opt_noreboot )
         machine_halt();
     else
-        machine_restart(5000);
+        machine_restart(15000);
 }
 
 /*
