@@ -740,19 +740,19 @@ void populate_module_maps(const multiboot_info_t *mbi,
                     break;
 
                 case LCM_MODULE_DOMAIN_KERNEL:
-                    __set_bit(i, module_map_domain_kernel);
+                    __set_bit(i + 1, module_map_domain_kernel);
                     break;
 
                 case LCM_MODULE_DOMAIN_RAMDISK:
-                    __set_bit(i, module_map_ramdisk);
+                    __set_bit(i + 1, module_map_ramdisk);
                     break;
 
                 case LCM_MODULE_CPU_MICROCODE:
-                    __set_bit(i, module_map_cpu_ucode);
+                    __set_bit(i + 1, module_map_cpu_ucode);
                     break;
 
                 case LCM_MODULE_XSM_FLASK_POLICY:
-                    __set_bit(i, module_map_xsm_flask);
+                    __set_bit(i + 1, module_map_xsm_flask);
                     break;
 
                 default:
@@ -889,6 +889,25 @@ void find_launch_control_module(const module_t *image)
 #endif
 }
 
+static inline bool check_multiboot_indices(unsigned long k_idx,
+                                           unsigned long r_idx,
+                                           unsigned long mods_count,
+                                       unsigned long *module_map_domain_kernel,
+                                       unsigned long *module_map_ramdisk)
+{
+    /* 0th module is the LCM, so 0 index indicates absence. */
+
+    if ( !k_idx || (k_idx >= mods_count) ||
+         !test_bit(k_idx, module_map_domain_kernel) )
+        return false;
+
+    if ( (r_idx > 0) && ((r_idx >= mods_count) ||
+                        !test_bit(r_idx, module_map_ramdisk)) )
+            return false;
+
+    return true;
+}
+
 bool find_boot_domain_modules(const module_t *image,
                               unsigned long *module_map_domain_kernel,
                               unsigned long *module_map_ramdisk,
@@ -915,12 +934,9 @@ bool find_boot_domain_modules(const module_t *image,
             unsigned int k_idx = entry->domain.kernel_index;
             unsigned int r_idx = entry->domain.ramdisk_index;
 
-            if ( (k_idx >= mods_count) ||
-                 !test_bit(k_idx, module_map_domain_kernel) )
-                return false;
-
-            if ( (r_idx > 0) && ((r_idx >= mods_count) ||
-                                 !test_bit(r_idx, module_map_ramdisk)) )
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
                 return false;
 
             *p_r_idx = r_idx;
@@ -966,12 +982,9 @@ bool find_dom0_modules(const module_t *image,
             unsigned int k_idx = entry->domain.kernel_index;
             unsigned int r_idx = entry->domain.ramdisk_index;
 
-            if ( (k_idx >= mods_count) ||
-                 !test_bit(k_idx, module_map_domain_kernel) )
-                return false;
-
-            if ( (r_idx > 0) && ((r_idx >= mods_count) ||
-                                 !test_bit(r_idx, module_map_ramdisk)) )
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
                 return false;
 
             *p_r_idx = r_idx;
@@ -1036,16 +1049,14 @@ bool find_domain_modules(const module_t *lcm_image,
             k_idx = entry->domain.kernel_index;
             r_idx = entry->domain.ramdisk_index;
 
-            if ( (k_idx >= mods_count) ||
-                 !test_bit(k_idx, module_map_domain_kernel) )
-                return false;
-
-            if ( (r_idx > 0) && ((r_idx >= mods_count) ||
-                                 !test_bit(r_idx, module_map_ramdisk)) )
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
                 return false;
 
             *p_r_idx = r_idx;
             *p_k_idx = k_idx;
+            *p_cfg = &(entry->domain.basic_config);
 
             return true;
         }
@@ -2362,9 +2373,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         if ( construct_boot_domain(
                 initial_domain, mod, &mod[boot_dom_kernel_idx],
                 modules_headroom[boot_dom_kernel_idx],
-                (boot_dom_ramdisk_idx > 0) &&
-                    (boot_dom_ramdisk_idx < mbi->mods_count) ?
-                                           mod + boot_dom_ramdisk_idx : NULL,
+                (boot_dom_ramdisk_idx > 0) ? mod + boot_dom_ramdisk_idx
+                                           : NULL,
                 boot_dom_cmdline) != 0 )
             panic("Could not set up boot domain guest OS\n");
     }
@@ -2378,8 +2388,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         if ( construct_dom0(dom0, &mod[dom0_kernel_idx],
                             modules_headroom[dom0_kernel_idx],
                             (dom0_ramdisk_idx > 0) &&
-                                (dom0_ramdisk_idx < mbi->mods_count) ?
-                                    mod + dom0_ramdisk_idx : NULL,
+                                (dom0_ramdisk_idx <= mbi->mods_count) ?
+                                    mod + (dom0_ramdisk_idx - 1) : NULL,
                             cmdline) != 0)
             panic("Could not set up DOM0 guest OS\n");
     }
