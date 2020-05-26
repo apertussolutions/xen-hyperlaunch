@@ -819,7 +819,7 @@ void validate_launch_control_module(const struct lcm_header_info *hdr)
 
         if ( entry->type == LCM_DATA_DOMAIN )
         {
-            if ( entry->domain.flags | LCM_DOMAIN_HAS_BASIC_CONFIG )
+            if ( entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG )
             {
                 if ( entry->domain.basic_config.functions |
                         LCM_DOMAIN_FUNCTION_BOOT )
@@ -839,7 +839,7 @@ void validate_launch_control_module(const struct lcm_header_info *hdr)
                     has_hardware_domain = true;
                 }
             }
-            else if ( entry->domain.flags | LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG )
+            else if ( entry->domain.flags & LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG )
             {
                 if ( has_high_priv_domain )
                     panic("Multiple high privilege domains defined in LCM\n");
@@ -908,7 +908,7 @@ bool find_boot_domain_modules(const module_t *image,
             break; /* this was the terminal entry */
 
         if ( (entry->type == LCM_DATA_DOMAIN) &&
-             (entry->domain.flags | LCM_DOMAIN_HAS_BASIC_CONFIG) &&
+             (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) &&
              (entry->domain.basic_config.functions | LCM_DOMAIN_FUNCTION_BOOT) )
         {
             unsigned int k_idx = entry->domain.kernel_index;
@@ -960,7 +960,7 @@ bool find_dom0_modules(const module_t *image,
             break; /* this was the terminal entry */
 
         if ( (entry->type == LCM_DATA_DOMAIN) &&
-             (entry->domain.flags | LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG) )
+             (entry->domain.flags & LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG) )
         {
             unsigned int k_idx = entry->domain.kernel_index;
             unsigned int r_idx = entry->domain.ramdisk_index;
@@ -1013,7 +1013,7 @@ bool find_domain_modules(const module_t *lcm_image,
             break; /* this was the terminal entry */
 
         if ( (entry->type == LCM_DATA_DOMAIN) &&
-             (entry->domain.flags | LCM_DOMAIN_HAS_BASIC_CONFIG) )
+             (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) )
         {
             unsigned int k_idx, r_idx;
 
