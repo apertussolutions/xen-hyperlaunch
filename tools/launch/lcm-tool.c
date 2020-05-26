@@ -462,18 +462,22 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
 
         if ( !strncmp(j_module_type->u.string, "kernel", 7) )
         {
+            debug("adding kernel module\n");
             entry->module_types.types[mod_idx] = LCM_MODULE_DOMAIN_KERNEL;
         }
         else if ( !strncmp(j_module_type->u.string, "ramdisk", 8) )
         {
+            debug("adding ramdisk module\n");
             entry->module_types.types[mod_idx] = LCM_MODULE_DOMAIN_RAMDISK;
         }
         else if ( !strncmp(j_module_type->u.string, "microcode", 10) )
         {
+            debug("adding microcode module\n");
             entry->module_types.types[mod_idx] = LCM_MODULE_CPU_MICROCODE;
         }
         else if ( !strncmp(j_module_type->u.string, "xsm_flask", 10) )
         {
+            debug("adding xsm/flask module\n");
             entry->module_types.types[mod_idx] = LCM_MODULE_XSM_FLASK_POLICY;
         }
         else
