@@ -71,9 +71,9 @@ struct lcm_domain_extended_config {
 struct lcm_domain {
     /* Flags here indicate which field structs are populated */
     uint16_t flags;
-#define LCM_DOMAIN_HAS_BASIC_CONFIG      1 << 0
-#define LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG  1 << 1
-#define LCM_DOMAIN_HAS_EXTENDED_CONFIG   1 << 2
+#define LCM_DOMAIN_HAS_BASIC_CONFIG      (1 << 0)
+#define LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG  (1 << 1)
+#define LCM_DOMAIN_HAS_EXTENDED_CONFIG   (1 << 2)
 
     /* Index of the domain kernel in the multiboot module array */
     uint8_t kernel_index;
