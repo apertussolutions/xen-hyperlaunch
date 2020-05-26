@@ -918,16 +918,11 @@ bool find_boot_domain_modules(const module_t *image,
                  !test_bit(k_idx, module_map_domain_kernel) )
                 return false;
 
-            if ( r_idx > 0 )
-            {
-                if ( (r_idx >= mods_count) ||
-                     !test_bit(r_idx, module_map_ramdisk) )
+            if ( (r_idx > 0) && ((r_idx >= mods_count) ||
+                                 !test_bit(r_idx, module_map_ramdisk)) )
                 return false;
 
-                __clear_bit(r_idx, module_map_ramdisk);
-            }
             *p_r_idx = r_idx;
-            __clear_bit(k_idx, module_map_domain_kernel);
             *p_k_idx = k_idx;
 
             return true;
@@ -974,16 +969,11 @@ bool find_dom0_modules(const module_t *image,
                  !test_bit(k_idx, module_map_domain_kernel) )
                 return false;
 
-            if ( r_idx > 0 )
-            {
-                if ( (r_idx >= mods_count) ||
-                     !test_bit(r_idx, module_map_ramdisk) )
+            if ( (r_idx > 0) && ((r_idx >= mods_count) ||
+                                 !test_bit(r_idx, module_map_ramdisk)) )
                 return false;
 
-                __clear_bit(r_idx, module_map_ramdisk);
-            }
             *p_r_idx = r_idx;
-            __clear_bit(k_idx, module_map_domain_kernel);
             *p_k_idx = k_idx;
 
             return true;
@@ -1046,16 +1036,11 @@ bool find_domain_modules(const module_t *lcm_image,
                  !test_bit(k_idx, module_map_domain_kernel) )
                 return false;
 
-            if ( r_idx > 0 )
-            {
-                if ( (r_idx >= mods_count) ||
-                     !test_bit(r_idx, module_map_ramdisk) )
+            if ( (r_idx > 0) && ((r_idx >= mods_count) ||
+                                 !test_bit(r_idx, module_map_ramdisk)) )
                 return false;
 
-                __clear_bit(r_idx, module_map_ramdisk);
-            }
             *p_r_idx = r_idx;
-            __clear_bit(k_idx, module_map_domain_kernel);
             *p_k_idx = k_idx;
 
             return true;
