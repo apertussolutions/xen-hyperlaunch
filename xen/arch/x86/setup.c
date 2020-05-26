@@ -1076,7 +1076,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 {
     char *memmap_type = NULL;
     char *cmdline, *kextra, *loader;
-    unsigned int dom0_kernel_idx = 0, dom0_ramdisk_idx;
+    unsigned int dom0_kernel_idx = 0, dom0_ramdisk_idx = 0;
     unsigned int boot_dom_kernel_idx = 0, boot_dom_ramdisk_idx = 0;
     unsigned int num_parked = 0;
     multiboot_info_t *mbi;
