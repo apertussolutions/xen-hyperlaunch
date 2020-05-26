@@ -613,7 +613,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
         if ( !d )
         {
             ret = -EINVAL;
-            if ( op->domain >= DOMID_FIRST_RESERVED )
+            if ( is_system_domain_id(op->domain) )
                 break;
 
             rcu_read_lock(&domlist_read_lock);

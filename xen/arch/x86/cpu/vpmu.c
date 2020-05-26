@@ -190,7 +190,7 @@ void vpmu_do_interrupt(struct cpu_user_regs *regs)
      * in XENPMU_MODE_ALL, for everyone.
      */
     if ( (vpmu_mode & XENPMU_MODE_ALL) ||
-         (sampled->domain->domain_id >= DOMID_FIRST_RESERVED) )
+         (is_system_domain(sampled->domain)) )
     {
         sampling = choose_hwdom_vcpu();
         if ( !sampling )
