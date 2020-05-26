@@ -24,9 +24,9 @@ static void noreturn maybe_reboot(void)
     }
     else
     {
-        printk("rebooting machine in 5 seconds.\n");
+        printk("rebooting machine in 15 seconds.\n");
         watchdog_disable();
-        machine_restart(5000);
+        machine_restart(15000);
     }
 }
 
