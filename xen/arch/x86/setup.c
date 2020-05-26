@@ -2187,6 +2187,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             .max_grant_frames = 1,
             .max_maptrack_frames = 0,
             .max_vcpus = 1,
+            .arch.emulation_flags = X86_EMU_LAPIC,
         };
 
         initial_domain = domain_create(DOMID_BOOT_DOMAIN, &dom_boot_cfg, false);
