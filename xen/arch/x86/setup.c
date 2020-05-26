@@ -723,7 +723,8 @@ void populate_module_maps(const multiboot_info_t *mbi,
             {
                 panic("Incorrect LCM field for number of multiboot modules\n");
             }
-            if ( entry->module_types.num_modules != mbi->mods_count )
+            /* Subtract one for the LCM itself */
+            if ( entry->module_types.num_modules != mbi->mods_count - 1 )
             {
                 printk("WARNING: LCM declared module count (%u) doesn't match "
                        "number of multiboot modules supplied (%u).\n",
