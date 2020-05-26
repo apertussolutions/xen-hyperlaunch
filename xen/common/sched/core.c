@@ -763,7 +763,7 @@ int sched_init_domain(struct domain *d, int poolid)
     int ret;
 
     ASSERT(d->cpupool == NULL);
-    ASSERT(d->domain_id < DOMID_FIRST_RESERVED);
+    ASSERT(!is_system_domain(d));
 
     if ( (ret = cpupool_add_domain(d, poolid)) )
         return ret;
@@ -787,7 +787,7 @@ int sched_init_domain(struct domain *d, int poolid)
 
 void sched_destroy_domain(struct domain *d)
 {
-    ASSERT(d->domain_id < DOMID_FIRST_RESERVED);
+    ASSERT(!is_system_domain(d));
 
     if ( d->cpupool )
     {
