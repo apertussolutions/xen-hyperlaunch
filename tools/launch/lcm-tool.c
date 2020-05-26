@@ -531,14 +531,15 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
               dom_idx+1, YAJL_GET_ARRAY(j_domains)->len,  kernel_mb_index);
 
         /* ---- verify that the indicated module is indeed a kernel */
-        if ( kernel_mb_index >= YAJL_GET_ARRAY(j_modules)->len )
+        if ( (kernel_mb_index > YAJL_GET_ARRAY(j_modules)->len) ||
+             (kernel_mb_index == 0) )
         {
             error("domain (%u/%lu) kernel index invalid\n",
                   dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
             return -EINVAL;
         }
 
-        j_module_type = YAJL_GET_ARRAY(j_modules)->values[kernel_mb_index];
+        j_module_type = YAJL_GET_ARRAY(j_modules)->values[kernel_mb_index - 1];
         if ( !YAJL_IS_STRING(j_module_type) ||
              strncmp(j_module_type->u.string, "kernel", 7) )
         {
@@ -560,20 +561,23 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         }
 
         /* ---- verify that the indicated module is indeed a ramdisk */
-        if ( ramdisk_mb_index >= YAJL_GET_ARRAY(j_modules)->len )
+        if ( ramdisk_mb_index > YAJL_GET_ARRAY(j_modules)->len )
         {
             error("domain (%u/%lu) ramdisk index invalid\n",
                   dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
             return -EINVAL;
         }
 
-        j_module_type = YAJL_GET_ARRAY(j_modules)->values[kernel_mb_index];
-        if ( !YAJL_IS_STRING(j_module_type) ||
-             strncmp(j_module_type->u.string, "kernel", 7) )
+        if ( ramdisk_mb_index > 0 )
         {
-            error("domain (%u/%lu) has ramdisk index mismatches module type\n",
-                  dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
-            return -EINVAL;
+            j_module_type = YAJL_GET_ARRAY(j_modules)->values[ramdisk_mb_index - 1];
+            if ( !YAJL_IS_STRING(j_module_type) ||
+                 strncmp(j_module_type->u.string, "ramdisk", 8) )
+            {
+                error("domain (%u/%lu) has ramdisk index mismatches module type\n",
+                      dom_idx+1, YAJL_GET_ARRAY(j_domains)->len);
+                return -EINVAL;
+            }
         }
         entry->domain.ramdisk_index = ramdisk_mb_index;
 
