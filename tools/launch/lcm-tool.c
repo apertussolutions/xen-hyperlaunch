@@ -460,19 +460,19 @@ int generate_launch_control_module(yajl_val config_node, FILE *file_stream)
         debug("module: (%u/%u) : %s\n", mod_idx+1,
               entry->module_types.num_modules, j_module_type->u.string);
 
-        if ( strncmp(j_module_type->u.string, "kernel", 7) )
+        if ( !strncmp(j_module_type->u.string, "kernel", 7) )
         {
             entry->module_types.types[mod_idx] = LCM_MODULE_DOMAIN_KERNEL;
         }
-        else if ( strncmp(j_module_type->u.string, "ramdisk", 8) )
+        else if ( !strncmp(j_module_type->u.string, "ramdisk", 8) )
         {
             entry->module_types.types[mod_idx] = LCM_MODULE_DOMAIN_RAMDISK;
         }
-        else if ( strncmp(j_module_type->u.string, "microcode", 10) )
+        else if ( !strncmp(j_module_type->u.string, "microcode", 10) )
         {
             entry->module_types.types[mod_idx] = LCM_MODULE_CPU_MICROCODE;
         }
-        else if ( strncmp(j_module_type->u.string, "xsm_flask", 10) )
+        else if ( !strncmp(j_module_type->u.string, "xsm_flask", 10) )
         {
             entry->module_types.types[mod_idx] = LCM_MODULE_XSM_FLASK_POLICY;
         }
