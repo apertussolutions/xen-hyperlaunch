@@ -2307,9 +2307,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                 dom_cfg.max_maptrack_frames = -1,
 
                 /* TODO: review emulation flags -> add to basic_config ? */
-                dom_cfg.arch.emulation_flags = XEN_X86_EMU_LAPIC |
-                                               XEN_X86_EMU_IOAPIC |
-                                               XEN_X86_EMU_VPCI;
+                /* see: emulation_flags_ok */
+                dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
 
                 dom_cfg.flags = (IS_ENABLED(CONFIG_TBOOT) ?
                                 XEN_DOMCTL_CDF_s3_integrity : 0) |
