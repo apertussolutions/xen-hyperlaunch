@@ -804,11 +804,12 @@ void validate_launch_control_module(const struct lcm_header_info *hdr)
      */
     entry = &hdr->entries[0];
     consumed = sizeof(struct lcm_header_info);
+
+    if ( (entry->len + consumed) == hdr->total_len )
+        panic("Insufficient entries in the LCM\n");
+
     for ( ; ; )
     {
-        if ( (entry->len + consumed) == hdr->total_len )
-            break; /* this was the terminal entry */
-
         if ( (entry->len + consumed) > hdr->total_len )
         {
             panic("Excess entry length in LCM: (%u + %u) > %u\n",
@@ -847,6 +848,9 @@ void validate_launch_control_module(const struct lcm_header_info *hdr)
                 has_high_priv_domain = true;
             }
         }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
 
         consumed += entry->len;
         entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
@@ -904,9 +908,6 @@ bool find_boot_domain_modules(const module_t *image,
     consumed = sizeof(struct lcm_header_info);
     for ( ; ; )
     {
-        if ( (entry->len + consumed) == hdr->total_len )
-            break; /* this was the terminal entry */
-
         if ( (entry->type == LCM_DATA_DOMAIN) &&
              (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) &&
              (entry->domain.basic_config.functions | LCM_DOMAIN_FUNCTION_BOOT) )
@@ -927,6 +928,9 @@ bool find_boot_domain_modules(const module_t *image,
 
             return true;
         }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
 
         consumed += entry->len;
         entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
@@ -956,9 +960,6 @@ bool find_dom0_modules(const module_t *image,
     consumed = sizeof(struct lcm_header_info);
     for ( ; ; )
     {
-        if ( (entry->len + consumed) == hdr->total_len )
-            break; /* this was the terminal entry */
-
         if ( (entry->type == LCM_DATA_DOMAIN) &&
              (entry->domain.flags & LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG) )
         {
@@ -978,6 +979,9 @@ bool find_dom0_modules(const module_t *image,
 
             return true;
         }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
 
         consumed += entry->len;
         entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
@@ -1009,9 +1013,6 @@ bool find_domain_modules(const module_t *lcm_image,
     consumed = sizeof(struct lcm_header_info);
     for ( ; ; )
     {
-        if ( (entry->len + consumed) == hdr->total_len )
-            break; /* this was the terminal entry */
-
         if ( (entry->type == LCM_DATA_DOMAIN) &&
              (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) )
         {
@@ -1023,6 +1024,9 @@ bool find_domain_modules(const module_t *lcm_image,
                         LCM_DOMAIN_FUNCTION_BOOT) ||
                  (cur_idx++ != domain_idx) )
             {
+                if ( (entry->len + consumed) == hdr->total_len )
+                    break; /* this was the terminal entry */
+
                 consumed += entry->len;
                 entry = (const struct lcm_entry *)
                             (((uint8_t *)entry) + entry->len);
@@ -1045,6 +1049,9 @@ bool find_domain_modules(const module_t *lcm_image,
 
             return true;
         }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
 
         consumed += entry->len;
         entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
