@@ -2308,43 +2308,42 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
         for ( dom_idx = 0; dom_idx < MAX_NUM_INITIAL_DOMAINS; dom_idx++ )
         {
-            if ( find_domain_modules(mod, module_map_domain_kernel,
+            if ( !find_domain_modules(mod, module_map_domain_kernel,
                                      module_map_ramdisk, mbi->mods_count,
                                      dom_idx, &k_idx, &r_idx, &basic_cfg) )
-            {
-                dom_id = dom_idx + 2; /* TODO: domid assignment? */
+                break;
 
-                /* populate dom_cfg from basic_cfg */
-                dom_cfg.ssidref = basic_cfg.xsm_sid;
-                for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
-                    dom_cfg.handle[i] = basic_cfg.domain_handle[i];
+            dom_id = dom_idx + 2; /* TODO: domid assignment? */
 
-                dom_cfg.max_vcpus = basic_cfg.cpus;
+            /* populate dom_cfg from basic_cfg */
+            dom_cfg.ssidref = basic_cfg.xsm_sid;
+            for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
+                dom_cfg.handle[i] = basic_cfg.domain_handle[i];
 
-                /* TODO: review these settings -> add to basic_config ? */
-                dom_cfg.max_evtchn_port = -1,
-                dom_cfg.max_grant_frames = -1,
-                dom_cfg.max_maptrack_frames = -1,
+            dom_cfg.max_vcpus = basic_cfg.cpus;
 
-                /* TODO: review emulation flags -> add to basic_config ? */
-                /* see: emulation_flags_ok */
-                dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
+            /* TODO: review these settings -> add to basic_config ? */
+            dom_cfg.max_evtchn_port = -1,
+            dom_cfg.max_grant_frames = -1,
+            dom_cfg.max_maptrack_frames = -1,
 
-                dom_cfg.flags = (IS_ENABLED(CONFIG_TBOOT) ?
-                                XEN_DOMCTL_CDF_s3_integrity : 0) |
-                                XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap,
-                dom_cfg.iommu_opts = 0;
+            /* TODO: review emulation flags -> add to basic_config ? */
+            /* see: emulation_flags_ok */
+            dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
 
-                dom = domain_create(dom_id, &dom_cfg, basic_cfg.permissions
-                                            & LCM_DOMAIN_PERMISSION_PRIVILEGED);
+            dom_cfg.flags = (IS_ENABLED(CONFIG_TBOOT) ?
+                            XEN_DOMCTL_CDF_s3_integrity : 0) |
+                            XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap,
+            dom_cfg.iommu_opts = 0;
 
-                if ( IS_ERR(dom) )
-                    panic("Error creating domain #%d\n", dom_id);
+            dom = domain_create(dom_id, &dom_cfg, basic_cfg.permissions
+                                        & LCM_DOMAIN_PERMISSION_PRIVILEGED);
+            if ( IS_ERR(dom) )
+                panic("Error creating domain #%d\n", dom_id);
 
-                /* FIXME: vcpu assignment */
-                if ( alloc_dom0_vcpu0(dom) == NULL )
-                    panic("Error assigning VCPU to domain #%d\n", dom_id);
-            }
+            /* FIXME: vcpu assignment */
+            if ( alloc_dom0_vcpu0(dom) == NULL )
+                panic("Error assigning VCPU to domain #%d\n", dom_id);
         }
     }
 
