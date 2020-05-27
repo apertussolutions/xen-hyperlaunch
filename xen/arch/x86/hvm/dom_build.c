@@ -258,16 +258,17 @@ int __init construct_pvh_boot_domain(struct domain *d,
                                      char *cmdline)
 {
     int rc;
-    const struct lcm_domain_basic_config *boot_domain_cfg;
+    struct lcm_domain_basic_config boot_domain_cfg;
     paddr_t entry, start_info;
 
     printk(XENLOG_INFO "*** Building PVH Boot Domain ***\n");
 
     /* boot domain is not a hardware domain so not setting up mmcfg here */
 
-    boot_domain_cfg = map_boot_domain_config(lcm_image);
+    boot_domain_cfg = *map_boot_domain_config(lcm_image);
+    bootstrap_map(NULL);
 
-    boot_domain_init_p2m(d, boot_domain_cfg);
+    boot_domain_init_p2m(d, &boot_domain_cfg);
 
     /* boot domain has no iommu access, so no init for that here */
 
@@ -275,17 +276,16 @@ int __init construct_pvh_boot_domain(struct domain *d,
     if ( rc )
     {
         printk("Failed to setup boot domain physical memory map\n");
-        bootstrap_map(NULL);
         return rc;
     }
 
     rc = pvh_load_kernel(d, kernel_image, image_headroom, initrd,
                          bootstrap_map(kernel_image),
                          cmdline, &entry, &start_info);
+    bootstrap_map(NULL);
     if ( rc )
     {
         printk("Failed to load boot domain kernel\n");
-        bootstrap_map(NULL);
         return rc;
     }
 
@@ -293,13 +293,10 @@ int __init construct_pvh_boot_domain(struct domain *d,
     if ( rc )
     {
         printk("Failed to setup boot domain CPUs: %d\n", rc);
-        bootstrap_map(NULL);
         return rc;
     }
 
     /* TODO: setup ACPI */
-
-    bootstrap_map(NULL);
 
     return 0;
 }
