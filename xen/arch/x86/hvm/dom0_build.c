@@ -619,9 +619,6 @@ int __init pvh_load_kernel(struct domain *d, const module_t *image,
         last_addr += ROUNDUP(initrd->mod_end, PAGE_SIZE);
     }
 
-    /* Free temporary buffers. */
-    discard_initial_images();
-
     if ( cmdline != NULL )
     {
         rc = hvm_copy_to_guest_phys(last_addr, cmdline, strlen(cmdline) + 1, v);

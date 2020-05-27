@@ -2397,6 +2397,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     /* TODO: loop constructing the remaining initial domains */
 
+    /* Free temporary buffers. */
+    discard_initial_images();
+
     if ( cpu_has_smap )
     {
         write_cr4(read_cr4() | X86_CR4_SMAP);
