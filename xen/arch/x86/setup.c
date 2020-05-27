@@ -1012,8 +1012,9 @@ bool find_domain_modules(const module_t *lcm_image,
                          unsigned int mods_count,
                          unsigned int domain_idx,
                          unsigned int *p_k_idx, unsigned int *p_r_idx,
-                         const struct lcm_domain_basic_config **p_cfg)
+                         struct lcm_domain_basic_config *p_cfg)
 {
+    bool rc = false;
 #ifdef CONFIG_BOOT_DOMAIN
     void *image_start;
     struct lcm_header_info *hdr;
@@ -1053,13 +1054,14 @@ bool find_domain_modules(const module_t *lcm_image,
             if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
                                           module_map_domain_kernel,
                                           module_map_ramdisk) )
-                return false;
+                break;
 
             *p_r_idx = r_idx;
             *p_k_idx = k_idx;
-            *p_cfg = &(entry->domain.basic_config);
+            *p_cfg = entry->domain.basic_config;
+            rc = true;
 
-            return true;
+            break;
         }
 
         if ( (entry->len + consumed) == hdr->total_len )
@@ -1069,8 +1071,9 @@ bool find_domain_modules(const module_t *lcm_image,
         entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
     }
 
+    bootstrap_map(NULL);
 #endif
-    return false;
+    return rc;
 }
 
 /* How much of the directmap is prebuilt at compile time. */
@@ -2298,7 +2301,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( launch_control_enabled )
     {
         unsigned int k_idx, r_idx, dom_idx;
-        const struct lcm_domain_basic_config *basic_cfg;
+        struct lcm_domain_basic_config basic_cfg;
         struct domain *dom;
         domid_t dom_id;
         struct xen_domctl_createdomain dom_cfg;
@@ -2313,11 +2316,11 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             dom_id = dom_idx + 2; /* TODO: domid assignment? */
 
             /* populate dom_cfg from basic_cfg */
-            dom_cfg.ssidref = basic_cfg->xsm_sid;
+            dom_cfg.ssidref = basic_cfg.xsm_sid;
             for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
-                dom_cfg.handle[i] = basic_cfg->domain_handle[i];
+                dom_cfg.handle[i] = basic_cfg.domain_handle[i];
 
-            dom_cfg.max_vcpus = basic_cfg->cpus;
+            dom_cfg.max_vcpus = basic_cfg.cpus;
 
             /* TODO: review these settings -> add to basic_config ? */
             dom_cfg.max_evtchn_port = -1,
@@ -2333,8 +2336,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                             XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap,
             dom_cfg.iommu_opts = 0;
 
-            dom = domain_create(dom_id, &dom_cfg, basic_cfg->permissions
-                                        | LCM_DOMAIN_PERMISSION_PRIVILEGED);
+            dom = domain_create(dom_id, &dom_cfg, basic_cfg.permissions
+                                        & LCM_DOMAIN_PERMISSION_PRIVILEGED);
 
             if ( IS_ERR(dom) )
                 panic("Error creating domain #%d\n", dom_id);
@@ -2342,8 +2345,6 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             /* FIXME: vcpu assignment */
             if ( alloc_dom0_vcpu0(dom) == NULL )
                 panic("Error assigning VCPU to domain #%d\n", dom_id);
-
-            bootstrap_map(NULL);
         }
     }
 
