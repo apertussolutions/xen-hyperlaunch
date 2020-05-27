@@ -207,11 +207,13 @@ int get_config_xsm_sid(yajl_val j_mod, const char *key[],
     char sidbuf[8];
     unsigned int cfg_len;
     const char **labels = (const char *[]){ "dom0", "domDM", "domU", "domBoot",
-                                            NULL };
+                                            "domHW", NULL };
     unsigned int *sid_vals = (unsigned int []){ SECINITSID_DOM0,
                                                 SECINITSID_DOMDM,
                                                 SECINITSID_DOMU,
-                                                SECINITSID_DOMBOOT };
+                                                SECINITSID_DOMBOOT,
+                                                SECINITSID_DOMU };
+    /* FIXME: there's no existing initial sid for a hardware domain */
 
     for ( i = 0; labels[i] != NULL; i++ )
         assert(sizeof(sidbuf) >= strlen(labels[i]));
