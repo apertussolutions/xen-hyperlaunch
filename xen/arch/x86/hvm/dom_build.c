@@ -157,6 +157,8 @@ static void __init boot_domain_setup_e820(struct domain *d,
         nr++;
     }
 
+    d->arch.nr_e820 = nr;
+
     ASSERT(nr == e820_entries);
     ASSERT(cur_pages == nr_pages);
 }
