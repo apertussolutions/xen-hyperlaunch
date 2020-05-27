@@ -282,6 +282,7 @@ int __init construct_pvh_boot_domain(struct domain *d,
     rc = pvh_load_kernel(d, kernel_image, image_headroom, initrd,
                          bootstrap_map(kernel_image),
                          cmdline, &entry, &start_info);
+    bootstrap_map(NULL);
     if ( rc )
     {
         printk("Failed to load boot domain kernel\n");
