@@ -169,7 +169,8 @@ static void __init boot_domain_init_p2m(struct domain *d,
     const struct lcm_domain_basic_config *cfg)
 {
     /* TODO: validate cfg.mem_size; add some round up */
-    unsigned long nr_pages = cfg->mem_size / PAGE_SIZE;
+    /*unsigned long nr_pages = cfg->mem_size / PAGE_SIZE;*/
+    unsigned long nr_pages = dom0_compute_nr_pages(d, NULL, 0);
     bool preempted;
 
     boot_domain_setup_e820(d, nr_pages);
