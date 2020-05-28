@@ -1120,7 +1120,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         .max_maptrack_frames = -1,
     };
     const char *hypervisor_name;
-    struct domain *dom0;
+    struct domain *dom0 = NULL; /* faulty compiler maybe-uninitialized */
 
     /* Critical region without IDT or TSS.  Any fault is deadly! */
 
