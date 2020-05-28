@@ -371,6 +371,7 @@ struct domain *domain_create(domid_t domid,
         if ( hardware_domid < 0 || hardware_domid >= DOMID_FIRST_RESERVED )
             panic("The value of hardware_dom must be a valid domain ID\n");
 
+        printk("Creating hardware domain with domid: %u\n", domid);
         d->disable_migrate = true;
         old_hwdom = hardware_domain;
         hardware_domain = d;
