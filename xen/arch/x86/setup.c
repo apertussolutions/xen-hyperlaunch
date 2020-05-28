@@ -2218,6 +2218,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         if ( IS_ERR(initial_domain) )
             panic("Error creating the boot domain\n");
 
+        printk("Set initial_domain to %u\n", initial_domain->domain_id);
+
         initial_domain->node_affinity = node_online_map;
         initial_domain->auto_node_affinity = 1;
         if ( vcpu_create(initial_domain, 0) == NULL )
@@ -2253,9 +2255,15 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             panic("Error creating domain 0\n");
 
         if ( !has_boot_domain )
+        {
             initial_domain = dom0;
+            printk("Set initial_domain to %u\n", initial_domain->domain_id);
+        }
         else /* FIXME: remove this else */
+        {
             auxiliary_domain = dom0;
+            printk("Set auxiliary domain to %u\n", auxiliary_domain->domain_id);
+        }
 
         if ( launch_control_enabled &&
              !find_dom0_modules(mod, module_map_domain_kernel,
@@ -2458,10 +2466,17 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                 if ( !has_high_priv_domain )
                 {
                     if ( !has_boot_domain )
+                    {
                         initial_domain = dom;
+                        printk("Set initial_domain to %u\n", initial_domain->domain_id);
+                    }
                     /* FIXME: remove use of aux domain when boot domain guest ready */
                     else
+                    {
                         auxiliary_domain = dom;
+                        printk("Set auxiliary domain to %u\n",
+                               auxiliary_domain->domain_id);
+                    }
                 }
             }
             else
