@@ -120,7 +120,6 @@ static s8 __initdata opt_smep = -1;
  * __start_xen and unpaused in init_done.
  */
 static struct domain *__initdata initial_domain;
-static struct domain *__initdata dom0; /* FIXME: remove this */
 
 static int __init parse_smep_param(const char *s)
 {
@@ -597,8 +596,6 @@ static void noinline init_done(void)
     system_state = SYS_STATE_active;
 
     domain_unpause_by_systemcontroller(initial_domain);
-    if ( initial_domain != dom0 ) /* FIXME: delete this */
-        domain_unpause_by_systemcontroller(dom0); /* FIXME: delete this */
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
@@ -1111,7 +1108,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         .max_maptrack_frames = -1,
     };
     const char *hypervisor_name;
-    /* struct domain *dom0; */
+    struct domain *dom0;
 
     /* Critical region without IDT or TSS.  Any fault is deadly! */
 
