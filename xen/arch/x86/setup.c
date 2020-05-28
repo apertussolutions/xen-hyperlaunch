@@ -44,6 +44,7 @@
 #include <xsm/xsm.h>
 #include <asm/tboot.h>
 #include <asm/bzimage.h> /* for bzimage_headroom */
+#include <asm/dom0_build.h> /* FIXME: temporary for dom0_construct_pv */
 #include <asm/mach-generic/mach_apic.h> /* for generic_apic_probe */
 #include <asm/setup.h>
 #include <xen/cpu.h>
@@ -2296,81 +2297,6 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
-
-    /* domain_create for the remaining initial domains */
-    if ( launch_control_enabled )
-    {
-        unsigned int k_idx, r_idx, dom_idx;
-        struct lcm_domain_basic_config basic_cfg;
-        struct domain *dom;
-        domid_t dom_id;
-        struct xen_domctl_createdomain dom_cfg;
-
-        for ( dom_idx = 0; dom_idx < MAX_NUM_INITIAL_DOMAINS; dom_idx++ )
-        {
-            if ( !find_domain_modules(mod, module_map_domain_kernel,
-                                     module_map_ramdisk, mbi->mods_count,
-                                     dom_idx, &k_idx, &r_idx, &basic_cfg) )
-                break;
-
-            dom_id = dom_idx + 2; /* TODO: domid assignment? */
-
-            /* populate dom_cfg from basic_cfg */
-            dom_cfg.flags = IS_ENABLED(CONFIG_TBOOT) ?
-                                XEN_DOMCTL_CDF_s3_integrity: 0;
-            dom_cfg.ssidref = basic_cfg.xsm_sid;
-            for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
-                dom_cfg.handle[i] = basic_cfg.domain_handle[i];
-
-            dom_cfg.max_vcpus = basic_cfg.cpus;
-
-            /* TODO: review these settings -> add to basic_config ? */
-            dom_cfg.max_evtchn_port = -1;
-            dom_cfg.max_grant_frames = -1;
-            dom_cfg.max_maptrack_frames = -1;
-
-            if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
-            {
-                if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
-                    panic("FIXME: hardware domain must be PV\n");
-
-                if ( iommu_enabled )
-                    dom_cfg.flags |= XEN_DOMCTL_CDF_iommu;
-
-                dom_cfg.arch.emulation_flags = 0;
-            }
-
-            /* Apply extra flags for PVH */
-            if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
-            {
-                dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
-                dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
-            }
-            else /* FIXME: deny use of non-PV domains for now */
-            {
-                if ( !(basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) )
-                    panic("FIXME: non-hardware domains must be PVH\n");
-            }
-
-            dom = domain_create(dom_id, &dom_cfg,
-                    basic_cfg.permissions & LCM_DOMAIN_PERMISSION_PRIVILEGED);
-            if ( IS_ERR(dom) )
-                panic("Error creating domain #%d\n", dom_id);
-
-            /* FIXME: vcpu assignment */
-            dom->node_affinity = node_online_map;
-            dom->auto_node_affinity = 1;
-            if ( vcpu_create(dom, 0) == NULL )
-                panic("Error setting VCPU0 for the domain %u\n", dom_id);
-
-            /* Without a boot domain or dom0, set hardware domain as initial */
-            if ( (basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) &&
-                 !has_boot_domain && !has_high_priv_domain )
-                initial_domain = dom;
-        }
-    }
-
-
     /*
      * Temporarily clear SMAP in CR4 to allow user-accesses in construct_dom0().
      * This saves a large number of corner cases interactions with
@@ -2412,13 +2338,111 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         if ( construct_dom0(dom0, &mod[dom0_kernel_idx],
                             modules_headroom[dom0_kernel_idx],
                             (dom0_ramdisk_idx > 0) &&
-                                (dom0_ramdisk_idx <= mbi->mods_count) ?
-                                    mod + (dom0_ramdisk_idx - 1) : NULL,
-                            cmdline) != 0)
+                                (dom0_ramdisk_idx < mbi->mods_count) ?
+                                    mod + dom0_ramdisk_idx : NULL,
+                            cmdline) != 0 )
             panic("Could not set up DOM0 guest OS\n");
     }
 
-    /* TODO: loop constructing the remaining initial domains */
+    /* create and construct the remaining initial domains */
+    if ( launch_control_enabled )
+    {
+        unsigned int dom_idx;
+        domid_t next_initial_domid = 1;
+
+        for ( dom_idx = 0; dom_idx < MAX_NUM_INITIAL_DOMAINS; dom_idx++ )
+        {
+            unsigned int k_idx, r_idx;
+            struct lcm_domain_basic_config basic_cfg;
+            struct xen_domctl_createdomain dom_cfg;
+            char *dom_cmdline;
+            struct domain *dom;
+            domid_t dom_id;
+
+            if ( !find_domain_modules(mod, module_map_domain_kernel,
+                                     module_map_ramdisk, mbi->mods_count,
+                                     dom_idx, &k_idx, &r_idx, &basic_cfg) )
+                break;
+
+            dom_id = next_initial_domid++;
+
+            /* populate dom_cfg from basic_cfg */
+            dom_cfg.flags = IS_ENABLED(CONFIG_TBOOT) ?
+                                XEN_DOMCTL_CDF_s3_integrity: 0;
+            dom_cfg.ssidref = basic_cfg.xsm_sid;
+            for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
+                dom_cfg.handle[i] = basic_cfg.domain_handle[i];
+
+            dom_cfg.max_vcpus = basic_cfg.cpus;
+
+            /* TODO: review these settings -> add to basic_config ? */
+            dom_cfg.max_evtchn_port = -1;
+            dom_cfg.max_grant_frames = -1;
+            dom_cfg.max_maptrack_frames = -1;
+
+            if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
+            {
+                if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
+                    panic("FIXME: hardware domain must be PV\n");
+
+                if ( iommu_enabled )
+                    dom_cfg.flags |= XEN_DOMCTL_CDF_iommu;
+
+                dom_cfg.arch.emulation_flags = 0;
+            }
+
+            /* Apply extra flags for PVH */
+            if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
+            {
+                dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
+                dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
+            }
+            else /* FIXME: deny non-PV domains besides hwdom or dom0 for now */
+            {
+                if ( !(basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) )
+                    panic("FIXME: non-hardware domains must be PVH\n");
+            }
+
+            dom = domain_create(dom_id, &dom_cfg,
+                    basic_cfg.permissions & LCM_DOMAIN_PERMISSION_PRIVILEGED);
+            if ( IS_ERR(dom) )
+                panic("Error creating domain #%d\n", dom_id);
+                /* FIXME: better failure handling */
+
+            /* FIXME: vcpu assignment */
+            dom->node_affinity = node_online_map;
+            dom->auto_node_affinity = 1;
+            if ( vcpu_create(dom, 0) == NULL )
+                panic("Error setting VCPU0 for the domain %u\n", dom_id);
+
+            /* Without a boot domain or dom0, set hardware domain as initial */
+            if ( (basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) &&
+                 !has_boot_domain && !has_high_priv_domain )
+                initial_domain = dom;
+
+            dom_cmdline =
+                (char *)(mod[k_idx].string ? __va(mod[k_idx].string) : NULL);
+
+            if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
+            {
+                /* FIXME: don't use dom0 construction */
+                if ( dom0_construct_pv(dom, &mod[k_idx], modules_headroom[k_idx],
+                                    (r_idx > 0) && (r_idx < mbi->mods_count) ?
+                                                    mod + r_idx : NULL,
+                                    dom_cmdline) != 0 )
+                    panic("Could not set up hardware domain guest OS\n");
+            }
+            else
+            {
+                if ( construct_initial_domain(dom, mod, &mod[k_idx],
+                                              modules_headroom[k_idx],
+                                              (r_idx > 0) ? mod + r_idx : NULL,
+                                              dom_cmdline) != 0 )
+                    panic("Could not set up initial domain %u guest OS\n",
+                          dom_idx+1);
+            }
+        }
+    }
 
     /* Free temporary buffers. */
     discard_initial_images();
