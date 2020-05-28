@@ -2472,6 +2472,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         }
     }
 
+    printk("Initial domain construction completed\n");
+
     /* Free temporary buffers. */
     discard_initial_images();
 
