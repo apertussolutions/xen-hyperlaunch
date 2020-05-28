@@ -2372,6 +2372,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
             dom_id = next_initial_domid++;
 
+            printk("*** Building initial domain %u ***\n", dom_id);
+
             /* populate dom_cfg from basic_cfg */
             dom_cfg.flags = IS_ENABLED(CONFIG_TBOOT) ?
                                 XEN_DOMCTL_CDF_s3_integrity: 0;
@@ -2401,6 +2403,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             /* Apply extra flags for PVH */
             if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
             {
+                printk("Initial domain %u is PVH-mode\n", dom_id);
                 dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
                 dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
             }
@@ -2408,6 +2411,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             {
                 if ( !(basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) )
                     panic("FIXME: non-hardware domains must be PVH\n");
+
+                printk("Initial domain %u is hardware PV-mode\n", dom_id);
             }
 
             dom = domain_create(dom_id, &dom_cfg,
