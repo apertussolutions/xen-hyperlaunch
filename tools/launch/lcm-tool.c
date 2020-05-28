@@ -145,6 +145,8 @@ int get_config_bool(yajl_val j_mod, const char *key[], uint32_t val,
 {
     int i;
 
+    debug("reading %s:\n", key[1]);
+
     yajl_val j_val = yajl_tree_get(j_mod, key, yajl_t_any);
     if ( !j_val )
     {
@@ -157,7 +159,12 @@ int get_config_bool(yajl_val j_mod, const char *key[], uint32_t val,
     }
 
     if ( YAJL_IS_TRUE(j_val) )
+    {
+        debug("bool %s: true\n", key[1]);
         *var |= val;
+    }
+    else
+        debug("bool %s: false\n", key[1]);
 
     return 0;
 }
