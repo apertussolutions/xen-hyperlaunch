@@ -598,9 +598,13 @@ static void noinline init_done(void)
 
     system_state = SYS_STATE_active;
 
+    printk("Unpausing initial domain: %u\n", initial_domain->domain_id);
     domain_unpause_by_systemcontroller(initial_domain);
     if ( auxiliary_domain )
+    {
+        printk("Unpausing aux domain: %u\n", auxiliary_domain->domain_id);
         domain_unpause_by_systemcontroller(auxiliary_domain);
+    }
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
