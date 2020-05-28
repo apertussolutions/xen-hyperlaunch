@@ -121,6 +121,8 @@ static s8 __initdata opt_smep = -1;
  * __start_xen and unpaused in init_done.
  */
 static struct domain *__initdata initial_domain;
+/* TODO: remove this use of aux domain when boot domain guest is ready */
+static struct domain *__initdata auxiliary_domain;
 
 static int __init parse_smep_param(const char *s)
 {
@@ -597,6 +599,8 @@ static void noinline init_done(void)
     system_state = SYS_STATE_active;
 
     domain_unpause_by_systemcontroller(initial_domain);
+    if ( auxiliary_domain )
+        domain_unpause_by_systemcontroller(auxiliary_domain);
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
@@ -2246,6 +2250,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
         if ( !has_boot_domain )
             initial_domain = dom0;
+        else /* FIXME: remove this else */
+            auxiliary_domain = dom0;
 
         if ( launch_control_enabled &&
              !find_dom0_modules(mod, module_map_domain_kernel,
@@ -2416,11 +2422,6 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             if ( vcpu_create(dom, 0) == NULL )
                 panic("Error setting VCPU0 for the domain %u\n", dom_id);
 
-            /* Without a boot domain or dom0, set hardware domain as initial */
-            if ( (basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) &&
-                 !has_boot_domain && !has_high_priv_domain )
-                initial_domain = dom;
-
             dom_cmdline =
                 (char *)(mod[k_idx].string ? __va(mod[k_idx].string) : NULL);
 
@@ -2432,6 +2433,16 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                                                     mod + r_idx : NULL,
                                     dom_cmdline) != 0 )
                     panic("Could not set up hardware domain guest OS\n");
+
+                /* Without a boot domain or dom0, set hardware domain as initial */
+                if ( !has_high_priv_domain )
+                {
+                    if ( !has_boot_domain )
+                        initial_domain = dom;
+                    /* FIXME: remove use of aux domain when boot domain guest ready */
+                    else
+                        auxiliary_domain = dom;
+                }
             }
             else
             {
