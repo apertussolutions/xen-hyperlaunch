@@ -46,6 +46,42 @@ int __init construct_boot_domain(struct domain *d,
     return 0;
 }
 
+int __init construct_initial_domain(struct domain *d,
+                                    const module_t *lcm,
+                                    const module_t *kernel,
+                                    unsigned long image_headroom,
+                                    const module_t *initrd, char *cmdline)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    int rc;
+
+    /* Sanity! */
+    BUG_ON(d->domain_id == DOMID_BOOT_DOMAIN);
+    BUG_ON(d->domain_id == 0);
+    BUG_ON(d->vcpu[0] == NULL);
+    BUG_ON(d->vcpu[0]->is_initialised);
+
+    process_pending_softirqs();
+
+    if ( is_hvm_domain(d) )
+        rc = construct_pvh_initial_domain(d, lcm, kernel, image_headroom, initrd,
+                                          cmdline);
+    else if ( is_pv_domain(d) )
+        panic("Cannot construct a PV initial domain\n");
+    else
+        panic("Cannot construct initial domain with unknown guest interface.\n");
+
+    if ( rc )
+        return rc;
+
+    /* Sanity! */
+    BUG_ON(!d->vcpu[0]->is_initialised);
+#else
+    ASSERT_UNREACHABLE();
+#endif
+    return 0;
+}
+
 /*
  * Local variables:
  * mode: C
