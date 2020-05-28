@@ -2316,6 +2316,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             dom_id = dom_idx + 2; /* TODO: domid assignment? */
 
             /* populate dom_cfg from basic_cfg */
+            dom_cfg.flags = IS_ENABLED(CONFIG_TBOOT) ?
+                                XEN_DOMCTL_CDF_s3_integrity: 0;
             dom_cfg.ssidref = basic_cfg.xsm_sid;
             for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
                 dom_cfg.handle[i] = basic_cfg.domain_handle[i];
@@ -2323,27 +2325,48 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             dom_cfg.max_vcpus = basic_cfg.cpus;
 
             /* TODO: review these settings -> add to basic_config ? */
-            dom_cfg.max_evtchn_port = -1,
-            dom_cfg.max_grant_frames = -1,
-            dom_cfg.max_maptrack_frames = -1,
+            dom_cfg.max_evtchn_port = -1;
+            dom_cfg.max_grant_frames = -1;
+            dom_cfg.max_maptrack_frames = -1;
 
-            /* TODO: review emulation flags -> add to basic_config ? */
-            /* see: emulation_flags_ok */
-            dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
+            if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
+            {
+                if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
+                    panic("FIXME: hardware domain must be PV\n");
 
-            dom_cfg.flags = (IS_ENABLED(CONFIG_TBOOT) ?
-                            XEN_DOMCTL_CDF_s3_integrity : 0) |
-                            XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap,
-            dom_cfg.iommu_opts = 0;
+                if ( iommu_enabled )
+                    dom_cfg.flags |= XEN_DOMCTL_CDF_iommu;
 
-            dom = domain_create(dom_id, &dom_cfg, basic_cfg.permissions
-                                        & LCM_DOMAIN_PERMISSION_PRIVILEGED);
+                dom_cfg.arch.emulation_flags = 0;
+            }
+
+            /* Apply extra flags for PVH */
+            if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
+            {
+                dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
+                dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
+            }
+            else /* FIXME: deny use of non-PV domains for now */
+            {
+                if ( !(basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) )
+                    panic("FIXME: non-hardware domains must be PVH\n");
+            }
+
+            dom = domain_create(dom_id, &dom_cfg,
+                    basic_cfg.permissions & LCM_DOMAIN_PERMISSION_PRIVILEGED);
             if ( IS_ERR(dom) )
                 panic("Error creating domain #%d\n", dom_id);
 
             /* FIXME: vcpu assignment */
-            if ( alloc_dom0_vcpu0(dom) == NULL )
-                panic("Error assigning VCPU to domain #%d\n", dom_id);
+            dom->node_affinity = node_online_map;
+            dom->auto_node_affinity = 1;
+            if ( vcpu_create(dom, 0) == NULL )
+                panic("Error setting VCPU0 for the domain %u\n", dom_id);
+
+            /* Without a boot domain or dom0, set hardware domain as initial */
+            if ( (basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) &&
+                 !has_boot_domain && !has_high_priv_domain )
+                initial_domain = dom;
         }
     }
 
