@@ -52,11 +52,7 @@ extern struct domain *hardware_domain;
 /* A global pointer to the initial cpupool (POOL0). */
 extern struct cpupool *cpupool0;
 
-#ifdef CONFIG_LATE_HWDOM
 extern domid_t hardware_domid;
-#else
-#define hardware_domid 0
-#endif
 
 #ifndef CONFIG_COMPAT
 #define BITS_PER_EVTCHN_WORD(d) BITS_PER_XEN_ULONG
