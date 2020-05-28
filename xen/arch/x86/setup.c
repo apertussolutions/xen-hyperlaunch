@@ -824,7 +824,7 @@ void validate_launch_control_module(const struct lcm_header_info *hdr)
         {
             if ( entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG )
             {
-                if ( entry->domain.basic_config.functions |
+                if ( entry->domain.basic_config.functions &
                         LCM_DOMAIN_FUNCTION_BOOT )
                 {
                     if ( has_boot_domain )
@@ -833,7 +833,7 @@ void validate_launch_control_module(const struct lcm_header_info *hdr)
                     has_boot_domain = true;
                 }
 
-                if ( entry->domain.basic_config.permissions |
+                if ( entry->domain.basic_config.permissions &
                         LCM_DOMAIN_PERMISSION_HARDWARE )
                 {
                     if ( has_hardware_domain )
@@ -931,7 +931,7 @@ bool find_boot_domain_modules(const module_t *image,
     {
         if ( (entry->type == LCM_DATA_DOMAIN) &&
              (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) &&
-             (entry->domain.basic_config.functions | LCM_DOMAIN_FUNCTION_BOOT) )
+             (entry->domain.basic_config.functions & LCM_DOMAIN_FUNCTION_BOOT) )
         {
             unsigned int k_idx = entry->domain.kernel_index;
             unsigned int r_idx = entry->domain.ramdisk_index;
@@ -1036,7 +1036,7 @@ bool find_domain_modules(const module_t *lcm_image,
 
             /* The boot domain has been accounted for - don't count it. */
             /* Seeking the nth domain basic config, indicated by the index. */
-            if ( (entry->domain.basic_config.functions |
+            if ( (entry->domain.basic_config.functions &
                         LCM_DOMAIN_FUNCTION_BOOT) ||
                  (cur_idx++ != domain_idx) )
             {
