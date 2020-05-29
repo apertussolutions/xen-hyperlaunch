@@ -759,9 +759,6 @@ int __init dom0_construct_pv(struct domain *d,
         init_hypercall_page(d, _p(parms.virt_hypercall));
     }
 
-    /* Free temporary buffers. */
-    discard_initial_images();
-
     /* Set up start info area. */
     si = (start_info_t *)vstartinfo_start;
     clear_page(si);
