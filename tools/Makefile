@@ -20,6 +20,7 @@ SUBDIRS-y += xenmon
 SUBDIRS-y += xentop
 SUBDIRS-y += libfsimage
 SUBDIRS-$(CONFIG_Linux) += vchan
+SUBDIRS-$(CONFIG_Linux) += launch
 
 # do not recurse in to a dir we are about to delete
 ifneq "$(MAKECMDGOALS)" "distclean"
