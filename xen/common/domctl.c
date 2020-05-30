@@ -399,9 +399,16 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
             return -ESRCH;
     }
 
-    ret = xsm_domctl(XSM_OTHER, d, op->cmd);
-    if ( ret )
-        goto domctl_out_unlock_domonly;
+    /* FIXME: */
+    if ( (d->domain_id == DOMID_BOOT_DOMAIN) &&
+         (op->cmd == XEN_DOMCTL_unpausedomain) )
+        ret = 0;
+    else
+    {
+        ret = xsm_domctl(XSM_OTHER, d, op->cmd);
+        if ( ret )
+            goto domctl_out_unlock_domonly;
+    }
 
     if ( !domctl_lock_acquire() )
     {
