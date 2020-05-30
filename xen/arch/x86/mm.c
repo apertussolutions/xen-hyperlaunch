@@ -4721,9 +4721,13 @@ long arch_memory_op(unsigned long cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
         unsigned int i;
         bool store;
 
-        rc = xsm_machine_memory_map(XSM_PRIV);
-        if ( rc )
-            return rc;
+        /* FIXME: */
+        if ( !is_hardware_domain(current->domain) )
+        {
+            rc = xsm_machine_memory_map(XSM_PRIV);
+            if ( rc )
+                return rc;
+        }
 
         if ( copy_from_guest(&ctxt.map, arg, 1) )
             return -EFAULT;

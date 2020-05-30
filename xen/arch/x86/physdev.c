@@ -110,9 +110,12 @@ int physdev_map_pirq(domid_t domid, int type, int *index, int *pirq_p,
     if ( d == NULL )
         return -ESRCH;
 
-    ret = xsm_map_domain_pirq(XSM_DM_PRIV, d);
-    if ( ret )
-        goto free_domain;
+    if ( !is_hardware_domain(d) ) /* FIXME */
+    {
+        ret = xsm_map_domain_pirq(XSM_DM_PRIV, d);
+        if ( ret )
+            goto free_domain;
+    }
 
     /* Verify or get irq. */
     switch ( type )
@@ -147,8 +150,11 @@ int physdev_unmap_pirq(domid_t domid, int pirq)
     if ( d == NULL )
         return -ESRCH;
 
-    if ( domid != DOMID_SELF || !is_hvm_domain(d) || !has_pirq(d) )
-        ret = xsm_unmap_domain_pirq(XSM_DM_PRIV, d);
+    if ( !is_hardware_domain(d) ) /* FIXME */
+    {
+        if ( domid != DOMID_SELF || !is_hvm_domain(d) || !has_pirq(d) )
+            ret = xsm_unmap_domain_pirq(XSM_DM_PRIV, d);
+    }
     if ( ret )
         goto free_domain;
 
@@ -355,9 +361,12 @@ ret_t do_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
         ret = -EFAULT;
         if ( copy_from_guest(&apic, arg, 1) != 0 )
             break;
-        ret = xsm_apic(XSM_PRIV, currd, cmd);
-        if ( ret )
-            break;
+        if ( !is_hardware_domain(currd) ) /* FIXME */
+        {
+            ret = xsm_apic(XSM_PRIV, currd, cmd);
+            if ( ret )
+                break;
+        }
         ret = ioapic_guest_read(apic.apic_physbase, apic.reg, &apic.value);
         if ( __copy_to_guest(arg, &apic, 1) )
             ret = -EFAULT;
@@ -369,9 +378,12 @@ ret_t do_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
         ret = -EFAULT;
         if ( copy_from_guest(&apic, arg, 1) != 0 )
             break;
-        ret = xsm_apic(XSM_PRIV, currd, cmd);
-        if ( ret )
-            break;
+        if ( !is_hardware_domain(currd) )
+        {
+            ret = xsm_apic(XSM_PRIV, currd, cmd);
+            if ( ret )
+                break;
+        }
         ret = ioapic_guest_write(apic.apic_physbase, apic.reg, apic.value);
         break;
     }
@@ -385,9 +397,12 @@ ret_t do_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
 
         /* Use the APIC check since this dummy hypercall should still only
          * be called by the domain with access to program the ioapic */
-        ret = xsm_apic(XSM_PRIV, currd, cmd);
-        if ( ret )
-            break;
+        if ( !is_hardware_domain(currd) ) /* FIXME */
+        {
+            ret = xsm_apic(XSM_PRIV, currd, cmd);
+            if ( ret )
+                break;
+        }
 
         /* Vector is only used by hypervisor, and dom0 shouldn't
            touch it in its world, return irq_op.irq as the vecotr,
@@ -535,20 +550,33 @@ ret_t do_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
         if ( copy_from_guest(&dev, arg, 1) )
             ret = -EFAULT;
         else
-            ret = xsm_resource_setup_pci(XSM_PRIV,
-                                         (dev.seg << 16) | (dev.bus << 8) |
-                                         dev.devfn) ?:
-                  pci_prepare_msix(dev.seg, dev.bus, dev.devfn,
-                                   cmd != PHYSDEVOP_prepare_msix);
+        {
+            if ( is_hardware_domain(currd) ) /* FIXME */
+            {
+                ret = pci_prepare_msix(dev.seg, dev.bus, dev.devfn,
+                                       cmd != PHYSDEVOP_prepare_msix);
+            }
+            else
+            {
+                ret = xsm_resource_setup_pci(XSM_PRIV,
+                                             (dev.seg << 16) | (dev.bus << 8) |
+                                             dev.devfn) ?:
+                      pci_prepare_msix(dev.seg, dev.bus, dev.devfn,
+                                       cmd != PHYSDEVOP_prepare_msix);
+            }
+        }
         break;
     }
 
     case PHYSDEVOP_pci_mmcfg_reserved: {
         struct physdev_pci_mmcfg_reserved info;
 
-        ret = xsm_resource_setup_misc(XSM_PRIV);
-        if ( ret )
-            break;
+        if ( !is_hardware_domain(currd) ) /* FIXME */
+        {
+            ret = xsm_resource_setup_misc(XSM_PRIV);
+            if ( ret )
+                break;
+        }
 
         ret = -EFAULT;
         if ( copy_from_guest(&info, arg, 1) )
@@ -611,9 +639,12 @@ ret_t do_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
         if ( setup_gsi.gsi < 0 || setup_gsi.gsi >= nr_irqs_gsi )
             break;
 
-        ret = xsm_resource_setup_gsi(XSM_PRIV, setup_gsi.gsi);
-        if ( ret )
-            break;
+        if ( !is_hardware_domain(currd) )
+        {
+            ret = xsm_resource_setup_gsi(XSM_PRIV, setup_gsi.gsi);
+            if ( ret )
+                break;
+        }
 
         ret = mp_register_gsi(setup_gsi.gsi, setup_gsi.triggering,
                               setup_gsi.polarity);
