@@ -1151,8 +1151,6 @@ long do_memory_op(unsigned long cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
     unsigned long start_extent = cmd >> MEMOP_EXTENT_SHIFT;
     int op = cmd & MEMOP_CMD_MASK;
 
-    printk("do_memory_op: op=%d\n", op);
-
     switch ( op )
     {
     case XENMEM_increase_reservation:

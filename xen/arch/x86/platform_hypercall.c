@@ -196,8 +196,6 @@ ret_t do_platform_op(XEN_GUEST_HANDLE_PARAM(xen_platform_op_t) u_xenpf_op)
     if ( op->interface_version != XENPF_INTERFACE_VERSION )
         return -EACCES;
 
-    printk("do_platform_op: cmd=%d\n", op->cmd);
-
     ret = xsm_platform_op(XSM_PRIV, op->cmd);
     if ( ret )
         return ret;

@@ -180,8 +180,6 @@ ret_t do_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
     ret_t ret;
     struct domain *currd = current->domain;
 
-    printk("do_physdev_op: cmd=%d\n", cmd);
-
     switch ( cmd )
     {
     case PHYSDEVOP_eoi: {

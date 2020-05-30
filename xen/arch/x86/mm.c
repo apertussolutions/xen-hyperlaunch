@@ -4271,8 +4271,6 @@ static int __do_update_va_mapping(
 
     perfc_incr(calls_to_update_va);
 
-    printk("update_va_mapping\n");
-
     rc = xsm_update_va_mapping(XSM_TARGET, d, pg_owner, val);
     if ( rc )
         return rc;
