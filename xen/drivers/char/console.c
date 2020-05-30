@@ -946,7 +946,10 @@ void guest_printk(const struct domain *d, const char *fmt, ...)
     va_list args;
     char prefix[16];
 
-    snprintf(prefix, sizeof(prefix), "(d%d) ", d->domain_id);
+    snprintf(prefix, sizeof(prefix), "(d%d%s%s%s) ", d->domain_id,
+            (d->domain_id == DOMID_BOOT_DOMAIN) ? ":boot" : "",
+            (is_hardware_domain(d) ? ":hw" : ""),
+            (is_control_domain(d) ? ":priv" : ""));
 
     va_start(args, fmt);
     vprintk_common(prefix, fmt, args);
