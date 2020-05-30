@@ -20,6 +20,7 @@ struct lcm_domain_basic_config {
     uint32_t functions;
 #define LCM_DOMAIN_FUNCTION_BOOT            (1 << 0)
 #define LCM_DOMAIN_FUNCTION_CONSOLE         (1 << 1)
+#define LCM_DOMAIN_FUNCTION_XENSTORE        (1 << 2)
 
     uint32_t mode;
 #define LCM_DOMAIN_MODE_PARAVIRTUALIZED     (1 << 0) /* PV | PVH/HVM */
