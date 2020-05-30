@@ -2201,8 +2201,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                      (hvm_hap_supported() ? XEN_DOMCTL_CDF_hvm : 0) |
                      XEN_DOMCTL_CDF_hap,
             .max_evtchn_port = -1,
-            .max_grant_frames = 1,
-            .max_maptrack_frames = 0,
+            .max_grant_frames = -1,
+            .max_maptrack_frames = -1,
             .max_vcpus = 1,
             .arch.emulation_flags = X86_EMU_LAPIC,
         };
