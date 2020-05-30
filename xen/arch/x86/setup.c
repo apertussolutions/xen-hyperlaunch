@@ -2396,6 +2396,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             /* populate dom_cfg from basic_cfg */
             dom_cfg.flags = IS_ENABLED(CONFIG_TBOOT) ?
                                 XEN_DOMCTL_CDF_s3_integrity: 0;
+            dom_cfg.flags |= basic_cfg.functions & LCM_DOMAIN_FUNCTION_XENSTORE ?
+                             XEN_DOMCTL_CDF_xs_domain : 0;
             dom_cfg.ssidref = basic_cfg.xsm_sid;
             for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
                 dom_cfg.handle[i] = basic_cfg.domain_handle[i];
