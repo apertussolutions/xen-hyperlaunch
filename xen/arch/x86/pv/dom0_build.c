@@ -742,7 +742,7 @@ int __init dom0_construct_pv(struct domain *d,
 
     si->shared_info = virt_to_maddr(d->shared_info);
 
-    if ( !pv_shim )
+    if ( is_control_domain(d) )
         si->flags    = SIF_PRIVILEGED | SIF_INITDOMAIN;
     if ( !vinitrd_start && initrd_len )
         si->flags   |= SIF_MOD_START_PFN;
