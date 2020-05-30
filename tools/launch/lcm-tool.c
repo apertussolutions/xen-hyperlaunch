@@ -331,6 +331,12 @@ int get_domain_basic_config(yajl_val j_cfg, struct lcm_domain *domain)
                          &domain->basic_config.functions) )
         return -EINVAL;
 
+    if ( get_config_bool(j_cfg, (const char *[]){ "functions", "xenstore",
+                                                  NULL },
+                         LCM_DOMAIN_FUNCTION_XENSTORE,
+                         &domain->basic_config.functions) )
+        return -EINVAL;
+
     if ( get_config_bool(j_cfg, (const char *[]){ "mode", "pv", NULL },
                          LCM_DOMAIN_MODE_PARAVIRTUALIZED,
                          &domain->basic_config.mode) )
