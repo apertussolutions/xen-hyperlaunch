@@ -196,9 +196,14 @@ ret_t do_platform_op(XEN_GUEST_HANDLE_PARAM(xen_platform_op_t) u_xenpf_op)
     if ( op->interface_version != XENPF_INTERFACE_VERSION )
         return -EACCES;
 
-    ret = xsm_platform_op(XSM_PRIV, op->cmd);
-    if ( ret )
-        return ret;
+    /* FIXME */
+    if ( !(is_hardware_domain(current->domain) &&
+          (op->cmd == XENPF_set_processor_pminfo)) )
+    {
+        ret = xsm_platform_op(XSM_PRIV, op->cmd);
+        if ( ret )
+            return ret;
+    }
 
     /*
      * Trylock here avoids deadlock with an existing platform critical section
