@@ -400,7 +400,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
     }
 
     /* FIXME: */
-    if ( (d->domain_id == DOMID_BOOT_DOMAIN) &&
+    if ( (current->domain->domain_id == DOMID_BOOT_DOMAIN) &&
          (op->cmd == XEN_DOMCTL_unpausedomain) )
         ret = 0;
     else
