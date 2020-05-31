@@ -1,0 +1,107 @@
+{
+    "modules": [ "kernel", "kernel", "kernel", "kernel" ],
+    "domains": [
+        {
+            "basic_config" : {
+                "domain_handle": "boot domain",
+                "permissions": {
+                    "privileged": false,
+                    "hardware": false
+                },
+                "functions": {
+                    "boot": true,
+                    "console": false,
+                    "xenstore": false
+                },
+                "mode": {
+                    "pv": false,
+                    "device_model": false
+                },
+                "memory": 67108864,
+                "cpus": 1,
+                "xsm_sid": "domBoot"
+            },
+            "modules" : {
+                "kernel" : 1
+            }
+        },
+        {
+            "basic_config" : {
+                "domain_handle": "hw domain",
+                "permissions": {
+                    "privileged": false,
+                    "hardware": true
+                },
+                "functions": {
+                    "boot": false,
+                    "console": true,
+                    "xenstore": true
+                },
+                "mode": {
+                    "pv": true,
+                    "device_model": false
+                },
+                "memory": 67108864,
+                "cpus": 1,
+                "xsm_sid": "domHW"
+            },
+            "modules" : {
+                "kernel" : 2
+            }
+        },
+        {
+            "basic_config" : {
+                "domain_handle": "first domU",
+                "permissions": {
+                    "privileged": false,
+                    "hardware": false
+                },
+                "functions": {
+                    "boot": false,
+                    "console": true,
+                    "xenstore": false
+                },
+                "mode": {
+                    "pv": false,
+                    "device_model": false
+                },
+                "memory": 67108864,
+                "cpus": 1,
+                "xsm_sid": "domU"
+            },
+            "extended_config" : {
+                "config" : "1st domU config goes here"
+            },
+            "modules" : {
+                "kernel" : 3
+            }
+        },
+        {
+            "basic_config" : {
+                "domain_handle": "2nd domU",
+                "permissions": {
+                    "privileged": false,
+                    "hardware": false
+                },
+                "functions": {
+                    "boot": false,
+                    "console": false,
+                    "xenstore": false
+                },
+                "mode": {
+                    "pv": false,
+                    "device_model": false
+                },
+                "memory": 67108864,
+                "cpus": 1,
+                "xsm_sid": "domU"
+            },
+            "extended_config" : {
+                "config" : "second domU config goes here"
+            },
+            "modules" : {
+                "kernel" : 4
+            }
+        }
+    ]
+}
