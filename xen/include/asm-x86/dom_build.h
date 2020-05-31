@@ -14,6 +14,7 @@ int construct_pvh_boot_domain(struct domain *d,
 
 int construct_pvh_initial_domain(struct domain *d,
                                  const module_t *lcm_image,
+                                 unsigned int lcm_dom_idx,
                                  const module_t *kernel_image,
                                  unsigned long image_headroom,
                                  const module_t *initrd,
