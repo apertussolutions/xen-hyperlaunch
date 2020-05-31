@@ -42,7 +42,7 @@ int construct_boot_domain(
     const module_t *initrd,
     char *cmdline);
 int construct_initial_domain(
-    struct domain *d, const module_t *lcm,
+    struct domain *d, const module_t *lcm, unsigned int lcm_dom_idx,
     const module_t *kernel, unsigned long kernel_headroom,
     const module_t *initrd,
     char *cmdline);

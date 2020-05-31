@@ -49,6 +49,7 @@ int __init construct_boot_domain(struct domain *d,
 
 int __init construct_initial_domain(struct domain *d,
                                     const module_t *lcm,
+                                    unsigned int lcm_dom_idx,
                                     const module_t *kernel,
                                     unsigned long image_headroom,
                                     const module_t *initrd, char *cmdline)
@@ -65,8 +66,8 @@ int __init construct_initial_domain(struct domain *d,
     process_pending_softirqs();
 
     if ( is_hvm_domain(d) )
-        rc = construct_pvh_initial_domain(d, lcm, kernel, image_headroom, initrd,
-                                          cmdline);
+        rc = construct_pvh_initial_domain(d, lcm, lcm_dom_idx, kernel,
+                                          image_headroom, initrd, cmdline);
     else if ( is_pv_domain(d) )
         panic("Cannot construct a PV initial domain\n");
     else

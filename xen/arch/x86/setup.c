@@ -2552,7 +2552,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             }
             else
             {
-                if ( construct_initial_domain(dom, mod, &mod[k_idx],
+                if ( construct_initial_domain(dom, mod, dom_idx, &mod[k_idx],
                                               modules_headroom[k_idx],
                                               (r_idx > 0) ? mod + r_idx : NULL,
                                               dom_cmdline) != 0 )
