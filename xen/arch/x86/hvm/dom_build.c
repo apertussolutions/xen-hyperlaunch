@@ -67,6 +67,35 @@ static __init const struct lcm_domain_basic_config *map_boot_domain_config(
     panic("Failed to find boot domain config in LCM\n");
 }
 
+static __init const struct lcm_domain_basic_config *map_basic_domain_config(
+    const module_t *lcm_image, unsigned int dom_idx)
+{
+    void *image_start;
+    struct lcm_header_info *hdr;
+    const struct lcm_entry *entry;
+    unsigned int consumed, cur_idx;
+
+    image_start = bootstrap_map(lcm_image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( cur_idx = 0; ; cur_idx++ )
+    {
+        if ( (entry->len + consumed) == hdr->total_len )
+            break;
+
+        if ( (entry->type == LCM_DATA_DOMAIN) &&
+             (entry->domain.flags | LCM_DOMAIN_HAS_BASIC_CONFIG) &&
+             (cur_idx == dom_idx) )
+            return &entry->domain.basic_config;
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+    panic("Failed to find domain config %u in LCM\n", dom_idx);
+}
+
 static void __init boot_domain_setup_e820(struct domain *d,
                                           unsigned long nr_pages)
 {
@@ -650,12 +679,76 @@ int __init construct_pvh_boot_domain(struct domain *d,
 
 int __init construct_pvh_initial_domain(struct domain *d,
                                         const module_t *lcm_image,
+                                        unsigned int lcm_dom_idx,
                                         const module_t *kernel_image,
                                         unsigned long image_headroom,
                                         const module_t *initrd,
                                         char *cmdline)
 {
-    panic("FIXME: construct_pvh_initial_domain not implemented\n");
+    int rc;
+    struct lcm_domain_basic_config basic_cfg;
+    paddr_t entry, start_info;
+
+    printk(XENLOG_INFO "--- Building a PVH Initial Domain, domid: %d ---\n",
+           d->domain_id);
+           /* TODO: display a better identifier here: add a 'name' string
+            * to basic_config? */
+
+    /*
+     * TODO: initial domains are not currently supposed as hardware domains
+     *        so not setting up mmcfg here
+     */
+
+    basic_cfg = *map_basic_domain_config(lcm_image, lcm_dom_idx);
+    bootstrap_map(NULL);
+
+    memcpy(d->handle, basic_cfg.domain_handle,
+           sizeof(xen_domain_handle_t));
+
+    /*
+     * TODO: memory calc for boot dom is likely different (simpler)
+     *       than for other domains; so a separate function makes sense
+     */
+    boot_domain_init_p2m(d, &basic_cfg);
+
+    /* boot domain has no iommu access, so no init for that here */
+
+    /*
+     * TODO: for domains with hardware, will need more complex p2m;
+     *       for now, reuse the simple boot domain logic
+     */
+    rc = boot_domain_populate_p2m(d);
+    if ( rc )
+    {
+        printk("Failed to setup initial domain (%d) physical memory map\n",
+               d->domain_id); /* FIXME: name identifier instead of domid */
+        return rc;
+    }
+
+    rc = pvh_load_kernel(d, kernel_image, image_headroom, initrd,
+                         bootstrap_map(kernel_image),
+                         cmdline, &entry, &start_info);
+    bootstrap_map(NULL);
+    if ( rc )
+    {
+        printk("Failed to load initial domain kernel\n");
+        return rc;
+    }
+
+    /*
+     * FIXME: boot domain only has a single VCPU; more setup appropriate
+     *        for the other initial domains (unless the boot domain does it)
+     */
+    rc = boot_domain_setup_cpus(d, entry, start_info);
+    if ( rc )
+    {
+        printk("Failed to setup initial domain CPUs, rc: %d\n", rc);
+        return rc;
+    }
+
+    /* TODO: setup ACPI */
+    boot_domain_setup_acpi(d, start_info);
+    return 0;
 }
 
 /*
