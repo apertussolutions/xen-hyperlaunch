@@ -686,6 +686,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
         unsigned int unit_p = new_p;
 
         unitdata = unit->priv;
+        unit->priv = unit_priv[unit_idx];
 
         for_each_sched_unit_vcpu ( unit, v )
         {
@@ -707,7 +708,6 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
          */
         spin_unlock_irq(lock);
 
-        unit->priv = unit_priv[unit_idx];
         if ( !d->is_dying )
             sched_move_irqs(unit);
 
@@ -763,7 +763,7 @@ int sched_init_domain(struct domain *d, int poolid)
     int ret;
 
     ASSERT(d->cpupool == NULL);
-    ASSERT(d->domain_id < DOMID_FIRST_RESERVED);
+    ASSERT(!is_system_domain(d));
 
     if ( (ret = cpupool_add_domain(d, poolid)) )
         return ret;
@@ -787,7 +787,7 @@ int sched_init_domain(struct domain *d, int poolid)
 
 void sched_destroy_domain(struct domain *d)
 {
-    ASSERT(d->domain_id < DOMID_FIRST_RESERVED);
+    ASSERT(!is_system_domain(d));
 
     if ( d->cpupool )
     {
@@ -2484,19 +2484,15 @@ static struct sched_unit *sched_wait_rendezvous_in(struct sched_unit *prev,
 
         *lock = pcpu_schedule_lock_irq(cpu);
 
-        if ( unlikely(!scheduler_active) )
-        {
-            ASSERT(is_idle_unit(prev));
-            atomic_set(&prev->next_task->rendezvous_out_cnt, 0);
-            prev->rendezvous_in_cnt = 0;
-        }
-
         /*
          * Check for scheduling resource switched. This happens when we are
          * moved away from our cpupool and cpus are subject of the idle
          * scheduler now.
+         *
+         * This is also a bail out case when scheduler_disable() has been
+         * called.
          */
-        if ( unlikely(sr != get_sched_res(cpu)) )
+        if ( unlikely(sr != get_sched_res(cpu) || !scheduler_active) )
         {
             ASSERT(is_idle_unit(prev));
             atomic_set(&prev->next_task->rendezvous_out_cnt, 0);
@@ -3344,6 +3340,16 @@ void __init sched_setup_dom0_vcpus(struct domain *d)
             sched_set_affinity(unit, NULL, &dom0_cpus);
         }
     }
+
+    domain_update_node_affinity(d);
+}
+
+void __init sched_setup_boot_domain_vcpu(struct domain *d)
+{
+    /* boot domain intentionally only has a single VCPU */
+
+    sched_set_affinity(d->vcpu[0]->sched_unit,
+                       cpumask_of(0), cpumask_of(0));
 
     domain_update_node_affinity(d);
 }

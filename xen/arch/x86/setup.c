@@ -26,6 +26,7 @@
 #include <xen/nodemask.h>
 #include <xen/virtual_region.h>
 #include <xen/watchdog.h>
+#include <public/launch_control_module.h>
 #include <public/version.h>
 #include <compat/platform.h>
 #include <compat/xen.h>
@@ -43,6 +44,7 @@
 #include <xsm/xsm.h>
 #include <asm/tboot.h>
 #include <asm/bzimage.h> /* for bzimage_headroom */
+#include <asm/dom0_build.h> /* FIXME: temporary for dom0_construct_pv */
 #include <asm/mach-generic/mach_apic.h> /* for generic_apic_probe */
 #include <asm/setup.h>
 #include <xen/cpu.h>
@@ -53,6 +55,9 @@
 #include <asm/spec_ctrl.h>
 #include <asm/guest.h>
 #include <asm/microcode.h>
+
+#define MAX_MULTIBOOT_MODS_COUNT 8 /* FIXME: move this; see: pvh_mbi_mods */
+#define MAX_NUM_INITIAL_DOMAINS 8 /* FIXME: review this and place correctly */
 
 /* opt_nosmp: If true, secondary processors are ignored. */
 static bool __initdata opt_nosmp;
@@ -115,7 +120,7 @@ static s8 __initdata opt_smep = -1;
  * Initial domain place holder. Needs to be global so it can be created in
  * __start_xen and unpaused in init_done.
  */
-static struct domain *__initdata dom0;
+static struct domain *__initdata initial_domain;
 
 static int __init parse_smep_param(const char *s)
 {
@@ -591,7 +596,8 @@ static void noinline init_done(void)
 
     system_state = SYS_STATE_active;
 
-    domain_unpause_by_systemcontroller(dom0);
+    printk("Unpausing initial domain: %u\n", initial_domain->domain_id);
+    domain_unpause_by_systemcontroller(initial_domain);
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
@@ -680,6 +686,398 @@ static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int li
     return n;
 }
 
+void populate_module_maps(const multiboot_info_t *mbi,
+                          const module_t *lcm_mod,
+                          unsigned long *module_map_xsm_flask,
+                          unsigned long *module_map_cpu_ucode,
+                          unsigned long *module_map_domain_kernel,
+                          unsigned long *module_map_ramdisk)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    const struct lcm_entry *entry;
+    unsigned int i, consumed;
+    void *lcm_start;
+    const struct lcm_header_info *hdr;
+
+/* REMEMBER: the lcm_data is user-supplied, so validate anything used */
+    consumed = sizeof(struct lcm_header_info);
+
+    lcm_start = bootstrap_map(lcm_mod);
+    hdr = (const struct lcm_header_info *)lcm_start;
+
+    entry = &hdr->entries[0];
+    for ( ; ; )
+    {
+        if ( (entry->len + consumed) > hdr->total_len )
+        {
+            panic("Excess entry length in LCM: (%u + %u) > %u\n",
+                  entry->len, consumed, hdr->total_len);
+        }
+        if ( entry->len & 3 )
+            panic("Misaligned entry length in LCM: %u\n", entry->len);
+
+        if ( entry->type == LCM_DATA_MODULE_TYPES )
+        {
+            /* Validate the number of modules */
+            if ( (sizeof(struct lcm_entry) +
+                  sizeof(struct lcm_module_types) +
+                  entry->module_types.num_modules) > entry->len )
+            {
+                panic("Incorrect LCM field for number of multiboot modules\n");
+            }
+            /* Subtract one for the LCM itself */
+            if ( entry->module_types.num_modules != mbi->mods_count - 1 )
+            {
+                printk("WARNING: LCM declared module count (%u) doesn't match "
+                       "number of multiboot modules supplied (%u).\n",
+                       entry->module_types.num_modules, mbi->mods_count);
+            }
+
+            for ( i = 0; i < entry->module_types.num_modules; i++ )
+            {
+                switch ( entry->module_types.types[i] )
+                {
+                case LCM_MODULE_LAUNCH_CONTROL_MODULE:
+                    printk("WARNING: ignoring LCM multiboot module #%u\n",
+                           i + 1);
+                    break;
+
+                case LCM_MODULE_DOMAIN_KERNEL:
+                    __set_bit(i + 1, module_map_domain_kernel);
+                    break;
+
+                case LCM_MODULE_DOMAIN_RAMDISK:
+                    __set_bit(i + 1, module_map_ramdisk);
+                    break;
+
+                case LCM_MODULE_CPU_MICROCODE:
+                    __set_bit(i + 1, module_map_cpu_ucode);
+                    break;
+
+                case LCM_MODULE_XSM_FLASK_POLICY:
+                    __set_bit(i + 1, module_map_xsm_flask);
+                    break;
+
+                default:
+                    printk("WARNING: unknown multiboot module type: %u\n",
+                           entry->module_types.types[i]);
+                case LCM_MODULE_IGNORE:
+                    break;
+                }
+            }
+        }
+
+/* TODO: make sure there's only a single LCM_DATA_MODULE_TYPES entry */
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+    bootstrap_map(NULL);
+#endif
+}
+
+static bool __initdata has_boot_domain = false;
+static bool __initdata has_high_priv_domain = false;
+#ifdef CONFIG_BOOT_DOMAIN
+static bool __initdata has_hardware_domain = false;
+
+void validate_launch_control_module(const struct lcm_header_info *hdr)
+{
+    const struct lcm_entry *entry;
+    unsigned int consumed;
+
+#define MAX_LCM_SIZE 4096 /* FIXME */
+#define MIN_LCM_SIZE ( sizeof(struct lcm_header_info) + \
+                       sizeof(struct lcm_entry) * 2  + \
+                       sizeof(struct lcm_module_types) + \
+                       sizeof(struct lcm_domain) )
+    if ( (hdr->total_len > MAX_LCM_SIZE) || (hdr->total_len < MIN_LCM_SIZE) )
+        panic("First multiboot module (LCM) reports invalid data length: %u\n",
+              hdr->total_len);
+    /* TODO: validate it against the mbi size */
+
+    /* Enforce either:
+     * a) there is a single boot domain, and a single hardware domain
+     * or
+     * b) there is a single high_priv domain (ie. a classic "dom0")
+     */
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+
+    if ( (entry->len + consumed) == hdr->total_len )
+        panic("Insufficient entries in the LCM\n");
+
+    for ( ; ; )
+    {
+        if ( (entry->len + consumed) > hdr->total_len )
+        {
+            panic("Excess entry length in LCM: (%u + %u) > %u\n",
+                  entry->len, consumed, hdr->total_len);
+        }
+        if ( entry->len & 3 )
+            panic("Misaligned entry length in LCM: %u\n", entry->len);
+
+        if ( entry->type == LCM_DATA_DOMAIN )
+        {
+            if ( entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG )
+            {
+                if ( entry->domain.basic_config.functions &
+                        LCM_DOMAIN_FUNCTION_BOOT )
+                {
+                    if ( has_boot_domain )
+                        panic("Multiple boot domains defined in LCM\n");
+
+                    has_boot_domain = true;
+                }
+
+                if ( entry->domain.basic_config.permissions &
+                        LCM_DOMAIN_PERMISSION_HARDWARE )
+                {
+                    if ( has_hardware_domain )
+                        panic("Multiple hardware domains defined in LCM\n");
+
+                    has_hardware_domain = true;
+                }
+            }
+            else if ( entry->domain.flags & LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG )
+            {
+                if ( has_high_priv_domain )
+                    panic("Multiple high privilege domains defined in LCM\n");
+
+                has_high_priv_domain = true;
+            }
+        }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+    if ( !has_high_priv_domain && !(has_boot_domain && has_hardware_domain) )
+        panic("LCM missing either: boot dom + hw dom; or high priv dom\n");
+}
+#endif
+
+void find_launch_control_module(const module_t *image)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    unsigned long image_len = image->mod_end;
+    const uint32_t lcm_magic_number = LCM_HEADER_MAGIC_NUMBER;
+    void *image_start;
+    struct lcm_header_info *hdr;
+
+    if ( image_len < sizeof(struct lcm_header_info) )
+        return;
+
+    image_start = bootstrap_map(image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    if ( memcmp(&hdr->magic_number, &lcm_magic_number, 4) == 0 )
+    {
+        /* TODO: verify hdr->checksum */
+
+        printk("Found Launch Control Module\n");
+        launch_control_enabled = true;
+
+        validate_launch_control_module(hdr);
+    }
+
+    bootstrap_map(NULL);
+#endif
+}
+
+static inline bool check_multiboot_indices(unsigned long k_idx,
+                                           unsigned long r_idx,
+                                           unsigned long mods_count,
+                                       unsigned long *module_map_domain_kernel,
+                                       unsigned long *module_map_ramdisk)
+{
+    /* 0th module is the LCM, so 0 index indicates absence. */
+
+    if ( !k_idx || (k_idx >= mods_count) ||
+         !test_bit(k_idx, module_map_domain_kernel) )
+        return false;
+
+    if ( (r_idx > 0) && ((r_idx >= mods_count) ||
+                        !test_bit(r_idx, module_map_ramdisk)) )
+            return false;
+
+    return true;
+}
+
+bool find_boot_domain_modules(const module_t *image,
+                              unsigned long *module_map_domain_kernel,
+                              unsigned long *module_map_ramdisk,
+                              unsigned int mods_count,
+                              unsigned int *p_k_idx, unsigned int *p_r_idx)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    void *image_start;
+    struct lcm_header_info *hdr;
+    const struct lcm_entry *entry;
+    unsigned int consumed;
+
+    image_start = bootstrap_map(image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( ; ; )
+    {
+        if ( (entry->type == LCM_DATA_DOMAIN) &&
+             (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) &&
+             (entry->domain.basic_config.functions & LCM_DOMAIN_FUNCTION_BOOT) )
+        {
+            unsigned int k_idx = entry->domain.kernel_index;
+            unsigned int r_idx = entry->domain.ramdisk_index;
+
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
+                return false;
+
+            *p_r_idx = r_idx;
+            *p_k_idx = k_idx;
+
+            return true;
+        }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+#endif
+    return false;
+}
+
+/* TODO: refactor common code with find_boot_domain_modules */
+bool find_dom0_modules(const module_t *image,
+                       unsigned long *module_map_domain_kernel,
+                       unsigned long *module_map_ramdisk,
+                       unsigned int mods_count,
+                       unsigned int *p_k_idx, unsigned int *p_r_idx)
+{
+#ifdef CONFIG_BOOT_DOMAIN
+    void *image_start;
+    struct lcm_header_info *hdr;
+    const struct lcm_entry *entry;
+    unsigned int consumed;
+
+    image_start = bootstrap_map(image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( ; ; )
+    {
+        if ( (entry->type == LCM_DATA_DOMAIN) &&
+             (entry->domain.flags & LCM_DOMAIN_HAS_HIGH_PRIV_CONFIG) )
+        {
+            unsigned int k_idx = entry->domain.kernel_index;
+            unsigned int r_idx = entry->domain.ramdisk_index;
+
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
+                return false;
+
+            *p_r_idx = r_idx;
+            *p_k_idx = k_idx;
+
+            return true;
+        }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+#endif
+    return false;
+}
+
+/* TODO: refactor common code with find_boot_domain_modules */
+bool find_domain_modules(const module_t *lcm_image,
+                         unsigned long *module_map_domain_kernel,
+                         unsigned long *module_map_ramdisk,
+                         unsigned int mods_count,
+                         unsigned int domain_idx,
+                         unsigned int *p_k_idx, unsigned int *p_r_idx,
+                         struct lcm_domain_basic_config *p_cfg)
+{
+    bool rc = false;
+#ifdef CONFIG_BOOT_DOMAIN
+    void *image_start;
+    struct lcm_header_info *hdr;
+    const struct lcm_entry *entry;
+    unsigned int consumed, cur_idx = 0;
+
+    image_start = bootstrap_map(lcm_image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( ; ; )
+    {
+        if ( (entry->type == LCM_DATA_DOMAIN) &&
+             (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) )
+        {
+            unsigned int k_idx, r_idx;
+
+            /* The boot domain has been accounted for - don't count it. */
+            /* Seeking the nth domain basic config, indicated by the index. */
+            if ( (entry->domain.basic_config.functions &
+                        LCM_DOMAIN_FUNCTION_BOOT) ||
+                 (cur_idx++ != domain_idx) )
+            {
+                if ( (entry->len + consumed) == hdr->total_len )
+                    break; /* this was the terminal entry */
+
+                consumed += entry->len;
+                entry = (const struct lcm_entry *)
+                            (((uint8_t *)entry) + entry->len);
+                continue;
+            }
+
+            k_idx = entry->domain.kernel_index;
+            r_idx = entry->domain.ramdisk_index;
+
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
+                break;
+
+            *p_r_idx = r_idx;
+            *p_k_idx = k_idx;
+            *p_cfg = entry->domain.basic_config;
+            rc = true;
+
+            break;
+        }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+    bootstrap_map(NULL);
+#endif
+    return rc;
+}
+
 /* How much of the directmap is prebuilt at compile time. */
 #define PREBUILT_MAP_LIMIT (1 << L2_PAGETABLE_SHIFT)
 
@@ -687,10 +1085,23 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 {
     char *memmap_type = NULL;
     char *cmdline, *kextra, *loader;
-    unsigned int initrdidx, num_parked = 0;
+    unsigned int dom0_kernel_idx = 0, dom0_ramdisk_idx = 0;
+    unsigned int boot_dom_kernel_idx = 0, boot_dom_ramdisk_idx = 0;
+    unsigned int num_parked = 0;
     multiboot_info_t *mbi;
     module_t *mod;
-    unsigned long nr_pages, raw_max_page, modules_headroom, module_map[1];
+    unsigned long nr_pages, raw_max_page;
+#define MODULE_MAP_SZ 1
+    unsigned long module_map[MODULE_MAP_SZ];
+    unsigned long raw_module_map_xsm_flask[MODULE_MAP_SZ];
+    unsigned long raw_module_map_cpu_ucode[MODULE_MAP_SZ];
+    unsigned long raw_module_map_domain_kernel[MODULE_MAP_SZ];
+    unsigned long raw_module_map_ramdisk[MODULE_MAP_SZ];
+    unsigned long *module_map_xsm_flask = raw_module_map_xsm_flask;
+    unsigned long *module_map_cpu_ucode = raw_module_map_cpu_ucode;
+    unsigned long *module_map_domain_kernel = raw_module_map_domain_kernel;
+    unsigned long *module_map_ramdisk = raw_module_map_ramdisk;
+    unsigned long modules_headroom[MAX_MULTIBOOT_MODS_COUNT];
     int i, j, e820_warn = 0, bytes = 0;
     bool acpi_boot_table_init_done = false, relocated = false;
     int ret;
@@ -706,6 +1117,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         .max_maptrack_frames = -1,
     };
     const char *hypervisor_name;
+    struct domain *dom0 = NULL; /* faulty compiler maybe-uninitialized */
 
     /* Critical region without IDT or TSS.  Any fault is deadly! */
 
@@ -855,15 +1267,16 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         panic("dom0 kernel not specified. Check bootloader configuration\n");
 
     /* Check that we don't have a silly number of modules. */
-    if ( mbi->mods_count > sizeof(module_map) * 8 )
+    ASSERT(MAX_MULTIBOOT_MODS_COUNT <= sizeof(module_map) * 8);
+    if ( mbi->mods_count > MAX_MULTIBOOT_MODS_COUNT )
     {
-        mbi->mods_count = sizeof(module_map) * 8;
+        mbi->mods_count = MAX_MULTIBOOT_MODS_COUNT;
         printk("Excessive multiboot modules - using the first %u only\n",
                mbi->mods_count);
     }
 
     bitmap_fill(module_map, mbi->mods_count);
-    __clear_bit(0, module_map); /* Dom0 kernel is always first */
+    __clear_bit(0, module_map); /* first module is always used */
 
     if ( pvh_boot )
     {
@@ -1009,8 +1422,40 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         mod[mbi->mods_count].mod_end = __2M_rwdata_end - _stext;
     }
 
-    modules_headroom = bzimage_headroom(bootstrap_map(mod), mod->mod_end);
-    bootstrap_map(NULL);
+    find_launch_control_module(mod); /* sets launch_control_enabled */
+
+    if ( launch_control_enabled )
+    {
+        populate_module_maps(mbi, mod, module_map_xsm_flask,
+                             module_map_cpu_ucode, module_map_domain_kernel,
+                             module_map_ramdisk);
+
+        for ( i = 0; i < mbi->mods_count; i++ )
+        {
+            if ( test_bit(i, module_map_domain_kernel) )
+            {
+                modules_headroom[i] = bzimage_headroom(
+                                        bootstrap_map(&mod[i]), mod[i].mod_end);
+                bootstrap_map(NULL);
+            }
+            else
+                modules_headroom[i] = 0;
+        }
+    }
+    else
+    {
+        module_map_xsm_flask = module_map;
+        module_map_cpu_ucode = module_map;
+        module_map_domain_kernel = module_map;
+        module_map_ramdisk = module_map;
+
+        modules_headroom[0] = bzimage_headroom(bootstrap_map(mod),
+                                               mod->mod_end);
+        bootstrap_map(NULL);
+
+        for ( i = 1; i < mbi->mods_count ; i++ )
+            modules_headroom[i] = 0;
+    }
 
 #ifndef highmem_start
     /* Don't allow split below 4Gb. */
@@ -1215,7 +1660,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         /* Is the region suitable for relocating the multiboot modules? */
         for ( j = mbi->mods_count - 1; j >= 0; j-- )
         {
-            unsigned long headroom = j ? 0 : modules_headroom;
+            unsigned long headroom = modules_headroom[j];
             unsigned long size = PAGE_ALIGN(headroom + mod[j].mod_end);
 
             if ( mod[j].reserved )
@@ -1263,11 +1708,12 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 #endif
     }
 
-    if ( modules_headroom && !mod->reserved )
-        panic("Not enough memory to relocate the dom0 kernel image\n");
     for ( i = 0; i < mbi->mods_count; ++i )
     {
         uint64_t s = (uint64_t)mod[i].mod_start << PAGE_SHIFT;
+
+        if ( modules_headroom[i] && !mod[i].reserved )
+            panic("Not enough memory to relocate kernel image, mod: %d\n", i);
 
         reserve_e820_ram(&boot_e820, s, s + PAGE_ALIGN(mod[i].mod_end));
     }
@@ -1554,7 +2000,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     mmio_ro_ranges = rangeset_new(NULL, "r/o mmio ranges",
                                   RANGESETF_prettyprint_hex);
 
-    xsm_multiboot_init(module_map, mbi);
+    xsm_multiboot_init(module_map_xsm_flask, mbi);
 
     setup_system_domains();
 
@@ -1606,7 +2052,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     init_IRQ();
 
-    microcode_grab_module(module_map, mbi);
+    microcode_grab_module(module_map_cpu_ucode, mbi);
 
     timer_init();
 
@@ -1746,6 +2192,39 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     init_guest_cpuid();
     init_guest_msr_policy();
 
+    if ( has_boot_domain )
+    {
+        /* If we're launching the boot domain, create it first, now. */
+        struct xen_domctl_createdomain dom_boot_cfg = {
+            .flags = (IS_ENABLED(CONFIG_TBOOT) ?
+                        XEN_DOMCTL_CDF_s3_integrity : 0) |
+                     (hvm_hap_supported() ? XEN_DOMCTL_CDF_hvm : 0) |
+                     XEN_DOMCTL_CDF_hap,
+            .max_evtchn_port = -1,
+            .max_grant_frames = -1,
+            .max_maptrack_frames = -1,
+            .max_vcpus = 1,
+            .arch.emulation_flags = X86_EMU_LAPIC,
+        };
+
+        initial_domain = domain_create(DOMID_BOOT_DOMAIN, &dom_boot_cfg, false);
+        if ( IS_ERR(initial_domain) )
+            panic("Error creating the boot domain\n");
+
+        printk("Set initial_domain to %u\n", initial_domain->domain_id);
+
+        initial_domain->node_affinity = node_online_map;
+        initial_domain->auto_node_affinity = 1;
+        if ( vcpu_create(initial_domain, 0) == NULL )
+            panic("Error setting VCPU0 for the boot domain\n");
+
+        if ( !find_boot_domain_modules(mod, module_map_domain_kernel,
+                                       module_map_ramdisk, mbi->mods_count,
+                                       &boot_dom_kernel_idx,
+                                       &boot_dom_ramdisk_idx) )
+            panic("Could not locate boot domain kernel multiboot module(s)\n");
+    }
+
     if ( opt_dom0_pvh )
     {
         dom0_cfg.flags |= (XEN_DOMCTL_CDF_hvm |
@@ -1760,50 +2239,70 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( iommu_enabled )
         dom0_cfg.flags |= XEN_DOMCTL_CDF_iommu;
 
-    /* Create initial domain 0. */
-    dom0 = domain_create(get_initial_domain_id(), &dom0_cfg, !pv_shim);
-    if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
-        panic("Error creating domain 0\n");
-
-    /* Grab the DOM0 command line. */
-    cmdline = (char *)(mod[0].string ? __va(mod[0].string) : NULL);
-    if ( (cmdline != NULL) || (kextra != NULL) )
+    if ( has_high_priv_domain || !launch_control_enabled )
     {
-        static char __initdata dom0_cmdline[MAX_GUEST_CMDLINE];
+        /* Create initial domain 0. */
+        dom0 = domain_create((pv_shim ? get_pv_shim_domain_id() : 0),
+                             &dom0_cfg, !pv_shim);
+        if ( IS_ERR(dom0) || (alloc_dom0_vcpu0(dom0) == NULL) )
+            panic("Error creating domain 0\n");
 
-        cmdline = cmdline_cook(cmdline, loader);
-        safe_strcpy(dom0_cmdline, cmdline);
-
-        if ( kextra != NULL )
-            /* kextra always includes exactly one leading space. */
-            safe_strcat(dom0_cmdline, kextra);
-
-        /* Append any extra parameters. */
-        if ( skip_ioapic_setup && !strstr(dom0_cmdline, "noapic") )
-            safe_strcat(dom0_cmdline, " noapic");
-        if ( (strlen(acpi_param) == 0) && acpi_disabled )
+        if ( !has_boot_domain )
         {
-            printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
-            safe_strcpy(acpi_param, "off");
-        }
-        if ( (strlen(acpi_param) != 0) && !strstr(dom0_cmdline, "acpi=") )
-        {
-            safe_strcat(dom0_cmdline, " acpi=");
-            safe_strcat(dom0_cmdline, acpi_param);
+            initial_domain = dom0;
+            printk("Set initial_domain to %u\n", initial_domain->domain_id);
         }
 
-        cmdline = dom0_cmdline;
+        if ( launch_control_enabled &&
+             !find_dom0_modules(mod, module_map_domain_kernel,
+                                module_map_ramdisk, mbi->mods_count,
+                                &dom0_kernel_idx, &dom0_ramdisk_idx) )
+            panic("Could not locate dom0 multiboot modules\n");
+
+        /* Grab the DOM0 command line. */
+        cmdline = (char *)(mod[dom0_kernel_idx].string ?
+                           __va(mod[dom0_kernel_idx].string) : NULL);
+        if ( (cmdline != NULL) || (kextra != NULL) )
+        {
+            static char __initdata dom0_cmdline[MAX_GUEST_CMDLINE];
+
+            cmdline = cmdline_cook(cmdline, loader);
+            safe_strcpy(dom0_cmdline, cmdline);
+
+            if ( kextra != NULL )
+                /* kextra always includes exactly one leading space. */
+                safe_strcat(dom0_cmdline, kextra);
+
+            /* Append any extra parameters. */
+            if ( skip_ioapic_setup && !strstr(dom0_cmdline, "noapic") )
+                safe_strcat(dom0_cmdline, " noapic");
+            if ( (strlen(acpi_param) == 0) && acpi_disabled )
+            {
+                printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
+                safe_strcpy(acpi_param, "off");
+            }
+            if ( (strlen(acpi_param) != 0) && !strstr(dom0_cmdline, "acpi=") )
+            {
+                safe_strcat(dom0_cmdline, " acpi=");
+                safe_strcat(dom0_cmdline, acpi_param);
+            }
+
+            cmdline = dom0_cmdline;
+        }
+
+        if ( !launch_control_enabled )
+        {
+            dom0_ramdisk_idx = find_first_bit(module_map_ramdisk,
+                                              mbi->mods_count);
+            if ( bitmap_weight(module_map, mbi->mods_count) > 1 )
+                printk(XENLOG_WARNING
+                       "Multiple initrd candidates, picking module #%u\n",
+                       dom0_ramdisk_idx);
+        }
     }
 
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
-
-    initrdidx = find_first_bit(module_map, mbi->mods_count);
-    if ( bitmap_weight(module_map, mbi->mods_count) > 1 )
-        printk(XENLOG_WARNING
-               "Multiple initrd candidates, picking module #%u\n",
-               initrdidx);
-
     /*
      * Temporarily clear SMAP in CR4 to allow user-accesses in construct_dom0().
      * This saves a large number of corner cases interactions with
@@ -1819,14 +2318,166 @@ void __init noreturn __start_xen(unsigned long mbi_p)
            cpu_has_nx ? XENLOG_INFO : XENLOG_WARNING "Warning: ",
            cpu_has_nx ? "" : "not ");
 
-    /*
-     * We're going to setup domain0 using the module(s) that we stashed safely
-     * above our heap. The second module, if present, is an initrd ramdisk.
-     */
-    if ( construct_dom0(dom0, mod, modules_headroom,
-                        (initrdidx > 0) && (initrdidx < mbi->mods_count)
-                        ? mod + initrdidx : NULL, cmdline) != 0)
-        panic("Could not set up DOM0 guest OS\n");
+    if ( has_boot_domain )
+    {
+        char *boot_dom_cmdline =
+            (char *)(mod[boot_dom_kernel_idx].string ?
+                     __va(mod[boot_dom_kernel_idx].string) : NULL);
+
+        /* TODO: investigate use of alternative cmdline obtained from the LCM */
+
+        if ( construct_boot_domain(
+                initial_domain, mod, &mod[boot_dom_kernel_idx],
+                modules_headroom[boot_dom_kernel_idx],
+                (boot_dom_ramdisk_idx > 0) ? mod + boot_dom_ramdisk_idx
+                                           : NULL,
+                boot_dom_cmdline) != 0 )
+            panic("Could not set up boot domain guest OS\n");
+    }
+
+    if ( has_high_priv_domain || !launch_control_enabled )
+    {
+        /*
+         * We're going to setup domain0 using the module(s) that we stashed
+         * safely above our heap.
+         */
+        if ( construct_dom0(dom0, &mod[dom0_kernel_idx],
+                            modules_headroom[dom0_kernel_idx],
+                            (dom0_ramdisk_idx > 0) &&
+                                (dom0_ramdisk_idx < mbi->mods_count) ?
+                                    mod + dom0_ramdisk_idx : NULL,
+                            cmdline) != 0 )
+            panic("Could not set up DOM0 guest OS\n");
+    }
+
+    /* create and construct the remaining initial domains */
+    if ( launch_control_enabled )
+    {
+        unsigned int dom_idx;
+        domid_t next_initial_domid = 1;
+        unsigned int misses = 0;
+
+        for ( dom_idx = 0; dom_idx < MAX_NUM_INITIAL_DOMAINS; dom_idx++ )
+        {
+            unsigned int k_idx, r_idx;
+            struct lcm_domain_basic_config basic_cfg;
+            struct xen_domctl_createdomain dom_cfg;
+            char *dom_cmdline;
+            struct domain *dom;
+            domid_t dom_id;
+
+            if ( !find_domain_modules(mod, module_map_domain_kernel,
+                                     module_map_ramdisk, mbi->mods_count,
+                                     dom_idx, &k_idx, &r_idx, &basic_cfg) )
+            {
+                /* allow one for the boot domain */
+                if ( ++misses == 1 )
+                    continue;
+
+                break;
+            }
+
+            dom_id = next_initial_domid++;
+
+            printk("*** Building initial domain %u ***\n", dom_id);
+
+            /* populate dom_cfg from basic_cfg */
+            dom_cfg.flags = IS_ENABLED(CONFIG_TBOOT) ?
+                                XEN_DOMCTL_CDF_s3_integrity: 0;
+            dom_cfg.flags |= basic_cfg.functions & LCM_DOMAIN_FUNCTION_XENSTORE ?
+                             XEN_DOMCTL_CDF_xs_domain : 0;
+            dom_cfg.ssidref = basic_cfg.xsm_sid;
+            for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
+                dom_cfg.handle[i] = basic_cfg.domain_handle[i];
+
+            dom_cfg.max_vcpus = basic_cfg.cpus;
+
+            /* TODO: review these settings -> add to basic_config ? */
+            dom_cfg.max_evtchn_port = -1;
+            dom_cfg.max_grant_frames = -1;
+            dom_cfg.max_maptrack_frames = -1;
+
+            if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
+            {
+                if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
+                    panic("FIXME: hardware domain must be PV\n");
+
+                if ( iommu_enabled )
+                    dom_cfg.flags |= XEN_DOMCTL_CDF_iommu;
+
+                dom_cfg.arch.emulation_flags = 0;
+                hardware_domid = dom_id;
+            }
+
+            /* Apply extra flags for PVH */
+            if ( !(basic_cfg.mode & LCM_DOMAIN_MODE_PARAVIRTUALIZED) )
+            {
+                printk("Initial domain %u is PVH-mode\n", dom_id);
+                dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
+                dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
+            }
+            else /* FIXME: deny non-PV domains besides hwdom or dom0 for now */
+            {
+                if ( !(basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) )
+                    panic("FIXME: non-hardware domains must be PVH\n");
+
+                printk("Initial domain %u is hardware PV-mode\n", dom_id);
+            }
+
+            dom = domain_create(dom_id, &dom_cfg,
+                    basic_cfg.permissions & LCM_DOMAIN_PERMISSION_PRIVILEGED);
+
+            if ( IS_ERR(dom) )
+                panic("Error creating domain #%d\n", dom_id);
+                /* FIXME: better failure handling */
+
+            /* FIXME: vcpu assignment */
+            dom->node_affinity = node_online_map;
+            dom->auto_node_affinity = 1;
+            if ( vcpu_create(dom, 0) == NULL )
+                panic("Error setting VCPU0 for the domain %u\n", dom_id);
+
+            dom_cmdline =
+                (char *)(mod[k_idx].string ? __va(mod[k_idx].string) : NULL);
+
+            if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
+            {
+                if ( dom != hardware_domain )
+                    panic("Failed to create hardware domain\n");
+
+                /* FIXME: don't use dom0 construction */
+                if ( dom0_construct_pv(dom, &mod[k_idx], modules_headroom[k_idx],
+                                    (r_idx > 0) && (r_idx < mbi->mods_count) ?
+                                                    mod + r_idx : NULL,
+                                    dom_cmdline) != 0 )
+                    panic("Could not set up hardware domain guest OS\n");
+
+                /* Without a boot domain or dom0, set hardware domain as initial */
+                if ( !has_high_priv_domain )
+                {
+                    if ( !has_boot_domain )
+                    {
+                        initial_domain = dom;
+                        printk("Set initial_domain to %u\n", initial_domain->domain_id);
+                    }
+                }
+            }
+            else
+            {
+                if ( construct_initial_domain(dom, mod, dom_idx, &mod[k_idx],
+                                              modules_headroom[k_idx],
+                                              (r_idx > 0) ? mod + r_idx : NULL,
+                                              dom_cmdline) != 0 )
+                    panic("Could not set up initial domain %u guest OS\n",
+                          dom_idx+1);
+            }
+        }
+    }
+
+    printk("Initial domain construction completed\n");
+
+    /* Free temporary buffers. */
+    discard_initial_images();
 
     if ( cpu_has_smap )
     {
@@ -1840,14 +2491,14 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     init_constructors();
 
-    console_endboot();
+    console_endboot(initial_domain->domain_id);
 
     /* Hide UART from DOM0 if we're using it */
     serial_endboot();
 
     dmi_end_boot();
 
-    setup_io_bitmap(dom0);
+    setup_io_bitmap(hardware_domain);
 
     if ( bsp_delay_spec_ctrl )
     {

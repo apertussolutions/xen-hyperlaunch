@@ -29,6 +29,15 @@ unsigned long dom0_paging_pages(const struct domain *d,
 void dom0_update_physmap(struct domain *d, unsigned long pfn,
                          unsigned long mfn, unsigned long vphysmap_s);
 
+int pvh_populate_memory_range(struct domain *d, unsigned long start,
+                              unsigned long nr_pages);
+
+int __init pvh_load_kernel(struct domain *d, const module_t *image,
+                           unsigned long image_headroom,
+                           const module_t *initrd, void *image_base,
+                           char *cmdline, paddr_t *entry,
+                           paddr_t *start_info_addr);
+
 #endif	/* _DOM0_BUILD_H_ */
 
 /*

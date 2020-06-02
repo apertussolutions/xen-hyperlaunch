@@ -174,6 +174,9 @@ static int flask_domain_alloc_security(struct domain *d)
     case DOMID_IO:
         dsec->sid = SECINITSID_DOMIO;
         break;
+    case DOMID_BOOT_DOMAIN:
+        dsec->sid = SECINITSID_DOMB;
+        break;
     default:
         dsec->sid = SECINITSID_UNLABELED;
     }

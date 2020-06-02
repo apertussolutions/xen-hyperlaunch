@@ -52,11 +52,7 @@ extern struct domain *hardware_domain;
 /* A global pointer to the initial cpupool (POOL0). */
 extern struct cpupool *cpupool0;
 
-#ifdef CONFIG_LATE_HWDOM
 extern domid_t hardware_domid;
-#else
-#define hardware_domid 0
-#endif
 
 #ifndef CONFIG_COMPAT
 #define BITS_PER_EVTCHN_WORD(d) BITS_PER_XEN_ULONG
@@ -542,9 +538,14 @@ extern struct vcpu *idle_vcpu[NR_CPUS];
 #define is_idle_domain(d) ((d)->domain_id == DOMID_IDLE)
 #define is_idle_vcpu(v)   (is_idle_domain((v)->domain))
 
+static inline bool is_system_domain_id(domid_t id)
+{
+    return (id >= DOMID_FIRST_RESERVED) && (id != DOMID_BOOT_DOMAIN);
+}
+
 static inline bool is_system_domain(const struct domain *d)
 {
-    return d->domain_id >= DOMID_FIRST_RESERVED;
+    return is_system_domain_id(d->domain_id);
 }
 
 #define DOMAIN_DESTROYED (1u << 31) /* assumes atomic_t is >= 32 bits */
@@ -914,6 +915,7 @@ static inline bool sched_has_urgent_vcpu(void)
 
 void vcpu_set_periodic_timer(struct vcpu *v, s_time_t value);
 void sched_setup_dom0_vcpus(struct domain *d);
+void sched_setup_boot_domain_vcpu(struct domain *d);
 int vcpu_temporary_affinity(struct vcpu *v, unsigned int cpu, uint8_t reason);
 int vcpu_set_hard_affinity(struct vcpu *v, const cpumask_t *affinity);
 void restore_vcpu_affinity(struct domain *d);

@@ -66,8 +66,8 @@ struct domain *domain_list;
 
 struct domain *hardware_domain __read_mostly;
 
-#ifdef CONFIG_LATE_HWDOM
 domid_t hardware_domid __read_mostly;
+#ifdef CONFIG_LATE_HWDOM
 integer_param("hardware_dom", hardware_domid);
 #endif
 
@@ -371,10 +371,13 @@ struct domain *domain_create(domid_t domid,
         if ( hardware_domid < 0 || hardware_domid >= DOMID_FIRST_RESERVED )
             panic("The value of hardware_dom must be a valid domain ID\n");
 
+        printk("Creating hardware domain with domid: %u\n", domid);
         d->disable_migrate = true;
         old_hwdom = hardware_domain;
         hardware_domain = d;
     }
+    else if ( domid == DOMID_BOOT_DOMAIN )
+        d->disable_migrate = true;
 
     TRACE_1D(TRC_DOM0_DOM_ADD, d->domain_id);
 
@@ -718,6 +721,8 @@ int domain_kill(struct domain *d)
         evtchn_destroy(d);
         gnttab_release_mappings(d);
         vnuma_destroy(d->vnuma);
+        if ( d->domain_id == DOMID_BOOT_DOMAIN )
+            console_to_hwdom();
         domain_set_outstanding_pages(d, 0);
         /* fallthrough */
     case DOMDYING_dying:

@@ -36,6 +36,16 @@ int construct_dom0(
     const module_t *kernel, unsigned long kernel_headroom,
     module_t *initrd,
     char *cmdline);
+int construct_boot_domain(
+    struct domain *d, const module_t *lcm,
+    const module_t *kernel, unsigned long kernel_headroom,
+    const module_t *initrd,
+    char *cmdline);
+int construct_initial_domain(
+    struct domain *d, const module_t *lcm, unsigned int lcm_dom_idx,
+    const module_t *kernel, unsigned long kernel_headroom,
+    const module_t *initrd,
+    char *cmdline);
 void setup_io_bitmap(struct domain *d);
 
 unsigned long initial_images_nrpages(nodeid_t node);
@@ -57,6 +67,11 @@ extern unsigned long highmem_start;
 
 extern int8_t opt_smt;
 
+#ifdef CONFIG_BOOT_DOMAIN
+extern bool launch_control_enabled;
+#else
+#define launch_control_enabled false
+#endif
 #ifdef CONFIG_SHADOW_PAGING
 extern bool opt_dom0_shadow;
 #else

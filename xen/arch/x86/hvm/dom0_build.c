@@ -100,9 +100,8 @@ static int __init modify_identity_mmio(struct domain *d, unsigned long pfn,
 }
 
 /* Populate a HVM memory range using the biggest possible order. */
-static int __init pvh_populate_memory_range(struct domain *d,
-                                            unsigned long start,
-                                            unsigned long nr_pages)
+int __init pvh_populate_memory_range(struct domain *d, unsigned long start,
+                                     unsigned long nr_pages)
 {
     struct {
         unsigned long align;
@@ -530,11 +529,11 @@ static paddr_t __init find_memory(
     return INVALID_PADDR;
 }
 
-static int __init pvh_load_kernel(struct domain *d, const module_t *image,
-                                  unsigned long image_headroom,
-                                  module_t *initrd, void *image_base,
-                                  char *cmdline, paddr_t *entry,
-                                  paddr_t *start_info_addr)
+int __init pvh_load_kernel(struct domain *d, const module_t *image,
+                           unsigned long image_headroom,
+                           const module_t *initrd, void *image_base,
+                           char *cmdline, paddr_t *entry,
+                           paddr_t *start_info_addr)
 {
     void *image_start = image_base + image_headroom;
     unsigned long image_len = image->mod_end;
@@ -619,9 +618,6 @@ static int __init pvh_load_kernel(struct domain *d, const module_t *image,
         mod.size = initrd->mod_end;
         last_addr += ROUNDUP(initrd->mod_end, PAGE_SIZE);
     }
-
-    /* Free temporary buffers. */
-    discard_initial_images();
 
     if ( cmdline != NULL )
     {

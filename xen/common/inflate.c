@@ -263,7 +263,7 @@ static void INIT free(void *where)
 {
     malloc_count--;
     if (!malloc_count)
-        malloc_ptr = free_mem_ptr;
+        malloc_ptr = 0;
 }
 #else
 #define malloc(a) kmalloc(a, GFP_KERNEL)
@@ -1296,6 +1296,7 @@ static int INIT gunzip(void)
         error("length error");
         return -1;
     }
+    bytes_out = 0;
     return 0;
 
  underrun:   /* NEXTBYTE() goto's here if needed */

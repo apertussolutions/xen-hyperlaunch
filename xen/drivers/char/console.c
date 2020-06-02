@@ -415,6 +415,7 @@ struct domain *console_input_domain(void)
 
 static void switch_serial_input(void)
 {
+    /*
     if ( console_rx == max_init_domid + 1 )
     {
         console_rx = 0;
@@ -430,6 +431,24 @@ static void switch_serial_input(void)
         printk(" (type 'CTRL-%c' three times to switch input)",
                opt_conswitch[0]);
     printk("\n");
+    */
+
+    /* Rotate between Xen, the boot domain and hardware domain */
+    if ( console_rx == DOMID_BOOT_DOMAIN + 1 )
+    {
+        console_rx = hardware_domain->domain_id + 1;
+        printk("*** Serial input to the hardware domain");
+    }
+    else if ( console_rx == 0 )
+    {
+        console_rx = DOMID_BOOT_DOMAIN + 1;
+        printk("*** Serial input to the boot domain");
+    }
+    else
+    {
+        console_rx = 0;
+        printk("*** Serial input to Xen");
+    }
 }
 
 static void __serial_rx(char c, struct cpu_user_regs *regs)
@@ -874,7 +893,10 @@ void guest_printk(const struct domain *d, const char *fmt, ...)
     va_list args;
     char prefix[16];
 
-    snprintf(prefix, sizeof(prefix), "(d%d) ", d->domain_id);
+    snprintf(prefix, sizeof(prefix), "(d%d%s%s%s) ", d->domain_id,
+            (d->domain_id == DOMID_BOOT_DOMAIN) ? ":boot" : "",
+            (is_hardware_domain(d) ? ":hw" : ""),
+            (is_control_domain(d) ? ":priv" : ""));
 
     va_start(args, fmt);
     vprintk_common(prefix, fmt, args);
@@ -997,7 +1019,7 @@ void __init console_init_postirq(void)
     console_init_ring();
 }
 
-void __init console_endboot(void)
+void __init console_endboot(domid_t console_domid)
 {
     printk("Std. Loglevel: %s", loglvl_str(xenlog_lower_thresh));
     if ( xenlog_upper_thresh != xenlog_lower_thresh )
@@ -1013,11 +1035,12 @@ void __init console_endboot(void)
 
     /*
      * If user specifies so, we fool the switch routine to redirect input
-     * straight back to Xen. I use this convoluted method so we still print
-     * a useful 'how to switch' message.
+     * straight back to Xen.
      */
     if ( opt_conswitch[1] == 'x' )
-        console_rx = max_init_domid + 1;
+        console_rx = 0;
+    else
+        console_rx = console_domid + 1;
 
     register_keyhandler('w', dump_console_ring_key,
                         "synchronously dump console ring buffer (dmesg)", 0);
@@ -1028,8 +1051,20 @@ void __init console_endboot(void)
     register_irq_keyhandler('G', &do_toggle_guest,
                             "toggle host/guest log level adjustment", 0);
 
-    /* Serial input is directed to DOM0 by default. */
-    switch_serial_input();
+    if ( switch_code )
+        printk(" (type 'CTRL-%c' three times to switch input)",
+               opt_conswitch[0]);
+    printk("\n");
+}
+
+void console_to_hwdom()
+{
+    if ( hardware_domain == NULL )
+        return;
+
+    printk("Switching console to the hardware domain\n");
+
+    console_rx = hardware_domain->domain_id + 1;
 }
 
 int __init console_has(const char *device)
@@ -1191,9 +1226,9 @@ void panic(const char *fmt, ...)
         printk("Manual reset required ('noreboot' specified)\n");
     else
 #ifdef CONFIG_X86
-        printk("%s in five seconds...\n", pv_shim ? "Crash" : "Reboot");
+        printk("%s in fifteen seconds...\n", pv_shim ? "Crash" : "Reboot");
 #else
-        printk("Reboot in five seconds...\n");
+        printk("Reboot in fifteen seconds...\n");
 #endif
 
     spin_unlock_irqrestore(&lock, flags);
@@ -1205,7 +1240,7 @@ void panic(const char *fmt, ...)
     if ( opt_noreboot )
         machine_halt();
     else
-        machine_restart(5000);
+        machine_restart(15000);
 }
 
 /*
