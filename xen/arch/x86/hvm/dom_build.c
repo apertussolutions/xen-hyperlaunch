@@ -57,8 +57,8 @@ static __init const struct lcm_domain_basic_config *map_boot_domain_config(
             break;
 
         if ( (entry->type == LCM_DATA_DOMAIN) &&
-             (entry->domain.flags | LCM_DOMAIN_HAS_BASIC_CONFIG) &&
-             (entry->domain.basic_config.functions | LCM_DOMAIN_FUNCTION_BOOT) )
+             (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) &&
+             (entry->domain.basic_config.functions & LCM_DOMAIN_FUNCTION_BOOT) )
             return &entry->domain.basic_config;
 
         consumed += entry->len;
