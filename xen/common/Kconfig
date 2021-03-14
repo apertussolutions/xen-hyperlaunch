@@ -316,6 +316,7 @@ config ARGO
 
 config HYPERLAUNCH
 	bool "Hyperlaunch support (UNSUPPORTED)" if UNSUPPORTED
+	default y
 	---help---
 	  Enables launch of multiple VMs at host boot as an alternative
 	  method of starting a Xen system.
