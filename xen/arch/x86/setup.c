@@ -45,6 +45,7 @@
 #include <xsm/xsm.h>
 #include <asm/tboot.h>
 #include <asm/bzimage.h> /* for bzimage_headroom */
+#include <asm/dom0_build.h> /* FIXME: temporary for dom0_construct_pv */
 #include <asm/mach-generic/mach_apic.h> /* for generic_apic_probe */
 #include <asm/setup.h>
 #include <xen/cpu.h>
@@ -2369,23 +2370,84 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
 
-    /* domain_create for the remaining initial domains */
+    if ( has_boot_domain )
+    {
+        char *boot_dom_cmdline =
+            (char *)(mod[boot_dom_kernel_idx].string ?
+                     __va(mod[boot_dom_kernel_idx].string) : NULL);
+
+        /* TODO: investigate use of alternative cmdline obtained from the LCM */
+
+        /*
+         * Temporarily clear SMAP in CR4 to allow user-accesses in
+         * construct_boot_domain().
+         * This saves a large number of corner cases interactions with
+         * copy_from_user().
+         */
+        if ( cpu_has_smap )
+        {
+            cr4_pv32_mask &= ~X86_CR4_SMAP;
+            write_cr4(read_cr4() & ~X86_CR4_SMAP);
+        }
+
+        if ( construct_boot_domain(
+                initial_domain, mod, &mod[boot_dom_kernel_idx],
+                modules_headroom[boot_dom_kernel_idx],
+                (boot_dom_ramdisk_idx > 0) ? mod + boot_dom_ramdisk_idx
+                                           : NULL,
+                boot_dom_cmdline) != 0 )
+            panic("Could not set up boot domain guest OS\n");
+
+        if ( cpu_has_smap )
+        {
+            write_cr4(read_cr4() | X86_CR4_SMAP);
+            cr4_pv32_mask |= X86_CR4_SMAP;
+        }
+    }
+
+    /*
+     * We're going to setup domain0 using the module(s) that we stashed safely
+     * above our heap. The second module, if present, is an initrd ramdisk.
+     */
+    if ( has_high_priv_domain || !hyperlaunch_enabled )
+    {
+        if ( hyperlaunch_enabled &&
+             !find_dom0_modules(mod, module_map_domain_kernel,
+                                module_map_ramdisk, mbi->mods_count,
+                                &dom0_kernel_idx, &dom0_ramdisk_idx) )
+            panic("Could not locate dom0 multiboot modules\n");
+
+        dom0 = create_dom0(mod + dom0_kernel_idx,
+                           modules_headroom[dom0_kernel_idx],
+                           (dom0_ramdisk_idx > 0) &&
+                                (dom0_ramdisk_idx <= mbi->mods_count) ?
+                                    mod + (dom0_ramdisk_idx - 1) : NULL,
+                           kextra, loader);
+        if ( !dom0 )
+            panic("Could not set up DOM0 guest OS\n");
+    }
+
+    /* create and construct the remaining initial domains */
     if ( hyperlaunch_enabled )
     {
-        unsigned int k_idx, r_idx, dom_idx;
-        struct lcm_domain_basic_config basic_cfg;
-        struct domain *dom;
-        domid_t dom_id;
-        struct xen_domctl_createdomain dom_cfg;
+        unsigned int dom_idx;
+        domid_t next_initial_domid = 1;
 
         for ( dom_idx = 0; dom_idx < MAX_NUM_INITIAL_DOMAINS; dom_idx++ )
         {
+            unsigned int k_idx, r_idx;
+            struct lcm_domain_basic_config basic_cfg;
+            struct xen_domctl_createdomain dom_cfg;
+            char *dom_cmdline;
+            struct domain *dom;
+            domid_t dom_id;
+
             if ( !find_domain_modules(mod, module_map_domain_kernel,
                                      module_map_ramdisk, mbi->mods_count,
                                      dom_idx, &k_idx, &r_idx, &basic_cfg) )
                 break;
 
-            dom_id = dom_idx + 2; /* TODO: domid assignment? */
+            dom_id = next_initial_domid++; /* TODO: read from LCM data */
 
             /* populate dom_cfg from basic_cfg */
             dom_cfg.flags = IS_ENABLED(CONFIG_TBOOT) ?
@@ -2418,7 +2480,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                 dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
                 dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
             }
-            else /* FIXME: deny use of non-PV domains for now */
+            else /* FIXME: deny use of non-PV domains besides hwdom or dom0 for now */
             {
                 if ( !(basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) )
                     panic("FIXME: non-hardware domains must be PVH\n");
@@ -2428,6 +2490,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                     basic_cfg.permissions & LCM_DOMAIN_PERMISSION_PRIVILEGED);
             if ( IS_ERR(dom) )
                 panic("Error creating domain #%d\n", dom_id);
+                /* FIXME: better failure handling */
 
             /* FIXME: vcpu assignment */
             dom->node_affinity = node_online_map;
@@ -2439,53 +2502,54 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             if ( (basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE) &&
                  !has_boot_domain && !has_high_priv_domain )
                 initial_domain = dom;
+
+            dom_cmdline =
+                (char *)(mod[k_idx].string ? __va(mod[k_idx].string) : NULL);
+
+            /*
+             * Temporarily clear SMAP in CR4 to allow user-accesses in
+             * domain construct functions.
+             * This saves a large number of corner cases interactions with
+             * copy_from_user().
+             */
+            if ( cpu_has_smap )
+            {
+                cr4_pv32_mask &= ~X86_CR4_SMAP;
+                write_cr4(read_cr4() & ~X86_CR4_SMAP);
+            }
+
+            if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
+            {
+                /* FIXME: don't use dom0 construction */
+                if ( dom0_construct_pv(dom, &mod[k_idx],
+                                       modules_headroom[k_idx],
+                                       (r_idx > 0) &&
+                                          (r_idx < mbi->mods_count) ?
+                                                    mod + r_idx : NULL,
+                                       dom_cmdline) != 0 )
+                    panic("Could not set up hardware domain guest OS\n");
+            }
+            else
+            {
+                if ( construct_initial_domain(dom, mod, &mod[k_idx],
+                                              modules_headroom[k_idx],
+                                              (r_idx > 0) ? mod + r_idx : NULL,
+                                              dom_cmdline) != 0 )
+                    panic("Could not set up initial domain %u guest OS\n",
+                          dom_idx+1);
+            }
+
+            if ( cpu_has_smap )
+            {
+                write_cr4(read_cr4() | X86_CR4_SMAP);
+                cr4_pv32_mask |= X86_CR4_SMAP;
+            }
         }
     }
 
     printk("%sNX (Execute Disable) protection %sactive\n",
            cpu_has_nx ? XENLOG_INFO : XENLOG_WARNING "Warning: ",
            cpu_has_nx ? "" : "not ");
-
-    if ( has_boot_domain )
-    {
-        char *boot_dom_cmdline =
-            (char *)(mod[boot_dom_kernel_idx].string ?
-                     __va(mod[boot_dom_kernel_idx].string) : NULL);
-
-        /* TODO: investigate use of alternative cmdline obtained from the LCM */
-
-        if ( construct_boot_domain(
-                initial_domain, mod, &mod[boot_dom_kernel_idx],
-                modules_headroom[boot_dom_kernel_idx],
-                (boot_dom_ramdisk_idx > 0) ? mod + boot_dom_ramdisk_idx
-                                           : NULL,
-                boot_dom_cmdline) != 0 )
-            panic("Could not set up boot domain guest OS\n");
-    }
-
-    /*
-     * We're going to setup domain0 using the module(s) that we stashed safely
-     * above our heap. The second module, if present, is an initrd ramdisk.
-     */
-    if ( has_high_priv_domain || !hyperlaunch_enabled )
-    {
-        if ( hyperlaunch_enabled &&
-             !find_dom0_modules(mod, module_map_domain_kernel,
-                                module_map_ramdisk, mbi->mods_count,
-                                &dom0_kernel_idx, &dom0_ramdisk_idx) )
-            panic("Could not locate dom0 multiboot modules\n");
-
-        dom0 = create_dom0(mod + dom0_kernel_idx,
-                           modules_headroom[dom0_kernel_idx],
-                           (dom0_ramdisk_idx > 0) &&
-                                (dom0_ramdisk_idx <= mbi->mods_count) ?
-                                    mod + (dom0_ramdisk_idx - 1) : NULL,
-                           kextra, loader);
-        if ( !dom0 )
-            panic("Could not set up DOM0 guest OS\n");
-    }
-
-    /* TODO: loop constructing the remaining initial domains */
 
     /* Free temporary buffers. */
     discard_initial_images();
