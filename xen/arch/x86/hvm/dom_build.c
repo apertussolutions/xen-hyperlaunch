@@ -268,6 +268,9 @@ int __init construct_pvh_boot_domain(struct domain *d,
     boot_domain_cfg = *map_boot_domain_config(lcm_image);
 	bootstrap_map(NULL);
 
+    memcpy(d->handle, boot_domain_cfg.domain_handle,
+           sizeof(xen_domain_handle_t));
+
     boot_domain_init_p2m(d, &boot_domain_cfg);
 
     /* boot domain has no iommu access, so no init for that here */
