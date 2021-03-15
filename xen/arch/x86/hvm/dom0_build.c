@@ -529,11 +529,11 @@ static paddr_t __init find_memory(
     return INVALID_PADDR;
 }
 
-static int __init pvh_load_kernel(struct domain *d, const module_t *image,
-                                  unsigned long image_headroom,
-                                  module_t *initrd, void *image_base,
-                                  char *cmdline, paddr_t *entry,
-                                  paddr_t *start_info_addr)
+int __init pvh_load_kernel(struct domain *d, const module_t *image,
+                           unsigned long image_headroom,
+                           const module_t *initrd, void *image_base,
+                           char *cmdline, paddr_t *entry,
+                           paddr_t *start_info_addr)
 {
     void *image_start = image_base + image_headroom;
     unsigned long image_len = image->mod_end;
