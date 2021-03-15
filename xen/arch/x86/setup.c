@@ -2464,6 +2464,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     /* TODO: loop constructing the remaining initial domains */
 
+    /* Free temporary buffers. */
+    discard_initial_images();
+
     if ( !has_boot_domain )
         initial_domain = dom0;
 
