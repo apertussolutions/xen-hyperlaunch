@@ -357,7 +357,7 @@ int pv_shim_shutdown(uint8_t reason)
     }
 
     /* Update domain id. */
-    d->domain_id = get_initial_domain_id();
+    d->domain_id = get_pv_shim_domain_id();
 
     /* Clean the iomem range. */
     BUG_ON(iomem_deny_access(d, 0, ~0UL));
@@ -997,12 +997,15 @@ void pv_shim_offline_memory(unsigned int nr, unsigned int order)
     }
 }
 
-domid_t get_initial_domain_id(void)
+domid_t get_pv_shim_domain_id(void)
 {
     uint32_t eax, ebx, ecx, edx;
 
     if ( !pv_shim )
+    {
+        ASSERT_UNREACHABLE();
         return 0;
+    }
 
     cpuid(xen_cpuid_base + 4, &eax, &ebx, &ecx, &edx);
 
