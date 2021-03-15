@@ -2578,6 +2578,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
            cpu_has_nx ? XENLOG_INFO : XENLOG_WARNING "Warning: ",
            cpu_has_nx ? "" : "not ");
 
+    printk("Initial domain construction completed\n");
+
     /* Free temporary buffers. */
     discard_initial_images();
 
