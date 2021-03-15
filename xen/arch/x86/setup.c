@@ -2521,6 +2521,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
             if ( basic_cfg.permissions & LCM_DOMAIN_PERMISSION_HARDWARE )
             {
+                if ( dom != hardware_domain )
+                    panic("Failed to create hardware domain\n");
+
                 /* FIXME: don't use dom0 construction */
                 if ( dom0_construct_pv(dom, &mod[k_idx],
                                        modules_headroom[k_idx],
