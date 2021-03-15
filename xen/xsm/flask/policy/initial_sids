@@ -15,4 +15,5 @@ sid irq
 sid device
 sid domU
 sid domDM
+sid domboot
 # FLASK
