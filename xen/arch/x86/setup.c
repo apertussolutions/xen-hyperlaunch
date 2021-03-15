@@ -27,6 +27,7 @@
 #include <xen/virtual_region.h>
 #include <xen/watchdog.h>
 #include <xen/setup.h>
+#include <public/launch_control_module.h>
 #include <public/version.h>
 #include <compat/platform.h>
 #include <compat/xen.h>
@@ -152,7 +153,7 @@ static s8 __initdata opt_smep = -1;
  * Initial domain place holder. Needs to be global so it can be created in
  * __start_xen and unpaused in init_done.
  */
-static struct domain *__initdata dom0;
+static struct domain *__initdata initial_domain;
 
 static int __init parse_smep_param(const char *s)
 {
@@ -633,7 +634,7 @@ static void noreturn init_done(void)
 
     system_state = SYS_STATE_active;
 
-    domain_unpause_by_systemcontroller(dom0);
+    domain_unpause_by_systemcontroller(initial_domain);
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
@@ -739,6 +740,31 @@ static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int li
     return n;
 }
 
+void find_launch_control_module(const module_t *image,
+                                unsigned long image_headroom)
+{
+#ifdef CONFIG_HYPERLAUNCH
+    unsigned long image_len = image->mod_end;
+    const uint32_t lcm_magic_number = LCM_HEADER_MAGIC_NUMBER;
+    void *image_start;
+    struct lcm_header_info *hdr;
+
+    if ( image_len < sizeof(struct lcm_header_info) )
+        return;
+
+    image_start = bootstrap_map(image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    if ( memcmp(&hdr->magic_number, &lcm_magic_number, 4) == 0 )
+    {
+        printk("Hyperlaunch: Found Launch Control Module\n");
+        hyperlaunch_enabled = true;
+    }
+
+    bootstrap_map(NULL);
+#endif
+}
+
 static struct domain *__init create_dom0(const module_t *image,
                                          unsigned long headroom,
                                          module_t *initrd, const char *kextra,
@@ -832,7 +858,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 {
     char *memmap_type = NULL;
     char *cmdline, *kextra, *loader;
-    unsigned int initrdidx, num_parked = 0;
+    unsigned int kdom0idx = 0, initrdidx, num_parked = 0;
     multiboot_info_t *mbi;
     module_t *mod;
     unsigned long nr_pages, raw_max_page, modules_headroom, module_map[1];
@@ -846,6 +872,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         .stop_bits = 1
     };
     const char *hypervisor_name;
+    struct domain *dom0;
 
     /* Critical region without IDT or TSS.  Any fault is deadly! */
 
@@ -998,7 +1025,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     }
 
     bitmap_fill(module_map, mbi->mods_count);
-    __clear_bit(0, module_map); /* Dom0 kernel is always first */
+    __clear_bit(0, module_map); /* first module is always used */
 
     if ( pvh_boot )
     {
@@ -1889,6 +1916,33 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     init_guest_cpuid();
     init_guest_msr_policy();
 
+    find_launch_control_module(mod, modules_headroom);
+
+    if ( hyperlaunch_enabled )
+    {
+        /* If we're launching the boot domain, create it first, now. */
+        struct xen_domctl_createdomain dom_boot_cfg = {
+            .flags = (IS_ENABLED(CONFIG_TBOOT) ?
+                        XEN_DOMCTL_CDF_s3_integrity : 0) |
+                     (hvm_hap_supported() ? XEN_DOMCTL_CDF_hvm : 0) |
+                     XEN_DOMCTL_CDF_hap,
+            .max_evtchn_port = -1,
+            .max_grant_frames = -1,
+            .max_maptrack_frames = -1,
+            .max_vcpus = 1,
+            .arch.emulation_flags = X86_EMU_LAPIC,
+        };
+
+        initial_domain = domain_create(DOMID_BOOT_DOMAIN, &dom_boot_cfg, false);
+        if ( IS_ERR(initial_domain) ||
+             (alloc_dom0_vcpu0(initial_domain) == NULL) )
+            panic("Error creating the boot domain\n");
+
+        /* TODO: use LCM to locate dom0 multiboot modules, if any */
+        kdom0idx = find_first_bit(module_map, mbi->mods_count);
+        __clear_bit(kdom0idx, module_map);
+    }
+
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
 
@@ -1907,11 +1961,14 @@ void __init noreturn __start_xen(unsigned long mbi_p)
      * We're going to setup domain0 using the module(s) that we stashed safely
      * above our heap. The second module, if present, is an initrd ramdisk.
      */
-    dom0 = create_dom0(mod, modules_headroom,
+    dom0 = create_dom0(mod + kdom0idx, modules_headroom,
                        initrdidx < mbi->mods_count ? mod + initrdidx : NULL,
                        kextra, loader);
     if ( !dom0 )
         panic("Could not set up DOM0 guest OS\n");
+
+    /* TODO: if ( !hyperlaunch_enabled ) */
+    initial_domain = dom0;
 
     heap_init_late();
 
