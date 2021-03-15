@@ -100,9 +100,8 @@ static int __init modify_identity_mmio(struct domain *d, unsigned long pfn,
 }
 
 /* Populate a HVM memory range using the biggest possible order. */
-static int __init pvh_populate_memory_range(struct domain *d,
-                                            unsigned long start,
-                                            unsigned long nr_pages)
+int __init pvh_populate_memory_range(struct domain *d, unsigned long start,
+                                     unsigned long nr_pages)
 {
     struct {
         unsigned long align;
