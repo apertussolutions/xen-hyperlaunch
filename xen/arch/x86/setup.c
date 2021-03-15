@@ -2437,6 +2437,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     {
         unsigned int dom_idx;
         domid_t next_initial_domid = 1;
+        unsigned int misses = 0;
 
         for ( dom_idx = 0; dom_idx < MAX_NUM_INITIAL_DOMAINS; dom_idx++ )
         {
@@ -2450,7 +2451,13 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             if ( !find_domain_modules(mod, module_map_domain_kernel,
                                      module_map_ramdisk, mbi->mods_count,
                                      dom_idx, &k_idx, &r_idx, &basic_cfg) )
+            {
+                /* allow one for the boot domain */
+                if ( ++misses == 1 )
+                    continue;
+
                 break;
+            }
 
             dom_id = next_initial_domid++; /* TODO: read from LCM data */
 
