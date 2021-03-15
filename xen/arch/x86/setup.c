@@ -58,6 +58,7 @@
 #include <asm/pv/domain.h>
 
 #define MAX_MULTIBOOT_MODS_COUNT 8 /* FIXME: move this; see: pvh_mbi_mods */
+#define MAX_NUM_INITIAL_DOMAINS 8 /* FIXME: review this and place correctly */
 
 /* opt_nosmp: If true, secondary processors are ignored. */
 static bool __initdata opt_nosmp;
@@ -1062,6 +1063,77 @@ bool find_dom0_modules(const module_t *image,
 
 #endif
     return false;
+}
+
+/* TODO: refactor common code with find_boot_domain_modules */
+bool find_domain_modules(const module_t *lcm_image,
+                         unsigned long *module_map_domain_kernel,
+                         unsigned long *module_map_ramdisk,
+                         unsigned int mods_count,
+                         unsigned int domain_idx,
+                         unsigned int *p_k_idx, unsigned int *p_r_idx,
+                         struct lcm_domain_basic_config *p_cfg)
+{
+    bool rc = false;
+#ifdef CONFIG_BOOT_DOMAIN
+    void *image_start;
+    struct lcm_header_info *hdr;
+    const struct lcm_entry *entry;
+    unsigned int consumed, cur_idx = 0;
+
+    image_start = bootstrap_map(lcm_image);
+    hdr = (struct lcm_header_info *)image_start;
+
+    entry = &hdr->entries[0];
+    consumed = sizeof(struct lcm_header_info);
+    for ( ; ; )
+    {
+        if ( (entry->type == LCM_DATA_DOMAIN) &&
+             (entry->domain.flags & LCM_DOMAIN_HAS_BASIC_CONFIG) )
+        {
+            unsigned int k_idx, r_idx;
+
+            /* The boot domain has been accounted for - don't count it. */
+            /* Seeking the nth domain basic config, indicated by the index. */
+            if ( (entry->domain.basic_config.functions &
+                        LCM_DOMAIN_FUNCTION_BOOT) ||
+                 (cur_idx++ != domain_idx) )
+            {
+                if ( (entry->len + consumed) == hdr->total_len )
+                    break; /* this was the terminal entry */
+
+                consumed += entry->len;
+                entry = (const struct lcm_entry *)
+                            (((uint8_t *)entry) + entry->len);
+                continue;
+            }
+
+            k_idx = entry->domain.kernel_index;
+            r_idx = entry->domain.ramdisk_index;
+
+            if ( !check_multiboot_indices(k_idx, r_idx, mods_count,
+                                          module_map_domain_kernel,
+                                          module_map_ramdisk) )
+                break;
+
+            *p_r_idx = r_idx;
+            *p_k_idx = k_idx;
+            *p_cfg = entry->domain.basic_config;
+            rc = true;
+
+            break;
+        }
+
+        if ( (entry->len + consumed) == hdr->total_len )
+            break; /* this was the terminal entry */
+
+        consumed += entry->len;
+        entry = (const struct lcm_entry *)(((uint8_t *)entry) + entry->len);
+    }
+
+    bootstrap_map(NULL);
+#endif
+    return rc;
 }
 
 static struct domain *__init create_dom0(const module_t *image,
@@ -2293,7 +2365,56 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     if ( xen_cpuidle )
         xen_processor_pmbits |= XEN_PROCESSOR_PM_CX;
 
-    /* TODO: do domain_create for the remaining initial domains */
+    /* domain_create for the remaining initial domains */
+    if ( hyperlaunch_enabled )
+    {
+        unsigned int k_idx, r_idx, dom_idx;
+        struct lcm_domain_basic_config basic_cfg;
+        struct domain *dom;
+        domid_t dom_id;
+        struct xen_domctl_createdomain dom_cfg;
+
+        for ( dom_idx = 0; dom_idx < MAX_NUM_INITIAL_DOMAINS; dom_idx++ )
+        {
+            if ( find_domain_modules(mod, module_map_domain_kernel,
+                                     module_map_ramdisk, mbi->mods_count,
+                                     dom_idx, &k_idx, &r_idx, &basic_cfg) )
+            {
+                dom_id = dom_idx + 2; /* TODO: domid assignment? */
+
+                /* populate dom_cfg from basic_cfg */
+                dom_cfg.ssidref = basic_cfg.xsm_sid;
+                for ( i = 0; i < sizeof(dom_cfg.handle); i++ )
+                    dom_cfg.handle[i] = basic_cfg.domain_handle[i];
+
+                dom_cfg.max_vcpus = basic_cfg.cpus;
+
+                /* TODO: review these settings -> add to basic_config ? */
+                dom_cfg.max_evtchn_port = -1,
+                dom_cfg.max_grant_frames = -1,
+                dom_cfg.max_maptrack_frames = -1,
+
+                /* TODO: review emulation flags -> add to basic_config ? */
+                /* see: emulation_flags_ok */
+                dom_cfg.arch.emulation_flags = X86_EMU_LAPIC;
+
+                dom_cfg.flags = (IS_ENABLED(CONFIG_TBOOT) ?
+                                XEN_DOMCTL_CDF_s3_integrity : 0) |
+                                XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap,
+                dom_cfg.iommu_opts = 0;
+
+                dom = domain_create(dom_id, &dom_cfg, basic_cfg.permissions
+                                            & LCM_DOMAIN_PERMISSION_PRIVILEGED);
+
+                if ( IS_ERR(dom) )
+                    panic("Error creating domain #%d\n", dom_id);
+
+                /* FIXME: vcpu assignment */
+                if ( alloc_dom0_vcpu0(dom) == NULL )
+                    panic("Error assigning VCPU to domain #%d\n", dom_id);
+            }
+        }
+    }
 
     printk("%sNX (Execute Disable) protection %sactive\n",
            cpu_has_nx ? XENLOG_INFO : XENLOG_WARNING "Warning: ",
