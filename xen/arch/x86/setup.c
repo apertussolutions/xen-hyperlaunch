@@ -158,9 +158,6 @@ static s8 __initdata opt_smep = -1;
  * __start_xen and unpaused in init_done.
  */
 static struct domain *__initdata initial_domain;
-/* TODO: remove this use of aux domain when boot domain guest is ready */
-static struct domain *__initdata auxiliary_domain;
-
 
 static int __init parse_smep_param(const char *s)
 {
@@ -643,11 +640,6 @@ static void noreturn init_done(void)
 
     printk("Unpausing initial domain: %u\n", initial_domain->domain_id);
     domain_unpause_by_systemcontroller(initial_domain);
-    if ( auxiliary_domain )
-    {
-        printk("Unpausing aux domain: %u\n", auxiliary_domain->domain_id);
-        domain_unpause_by_systemcontroller(auxiliary_domain);
-    }
 
     /* MUST be done prior to removing .init data. */
     unregister_init_virtual_region();
@@ -2554,11 +2546,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                 {
                     if ( !has_boot_domain )
                         initial_domain = dom;
-                    /* FIXME: remove use of aux domain when boot domain guest ready */
-                    else
-                        auxiliary_domain = dom;
                 }
-
             }
             else
             {
@@ -2589,8 +2577,6 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     if ( !has_boot_domain )
         initial_domain = dom0;
-    else /* FIXME: remove this else */
-        auxiliary_domain = dom0;
 
     heap_init_late();
 
