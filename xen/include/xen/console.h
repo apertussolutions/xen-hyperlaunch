@@ -17,7 +17,8 @@ void console_init_preirq(void);
 void console_init_ring(void);
 void console_init_irq(void);
 void console_init_postirq(void);
-void console_endboot(void);
+void console_endboot(domid_t console_domid);
+void console_to_hwdom(void);
 int console_has(const char *device);
 
 int fill_console_start_info(struct dom0_vga_console_info *);
