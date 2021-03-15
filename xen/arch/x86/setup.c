@@ -846,8 +846,7 @@ void populate_module_maps(const multiboot_info_t *mbi,
 #endif
 }
 
-void find_launch_control_module(const module_t *image,
-                                unsigned long image_headroom)
+void find_launch_control_module(const module_t *image)
 {
 #ifdef CONFIG_HYPERLAUNCH
     unsigned long image_len = image->mod_end;
