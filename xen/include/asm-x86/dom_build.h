@@ -12,6 +12,13 @@ int construct_pvh_boot_domain(struct domain *d,
                               const module_t *initrd,
                               char *cmdline);
 
+int construct_pvh_initial_domain(struct domain *d,
+                                 const module_t *lcm_image,
+                                 const module_t *kernel_image,
+                                 unsigned long image_headroom,
+                                 const module_t *initrd,
+                                 char *cmdline);
+
 #endif /* _DOM_BUILD_H_ */
 
 /*
