@@ -2477,6 +2477,7 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                     dom_cfg.flags |= XEN_DOMCTL_CDF_iommu;
 
                 dom_cfg.arch.emulation_flags = 0;
+                hardware_domid = dom_id;
             }
 
             /* Apply extra flags for PVH */
@@ -2576,14 +2577,14 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     init_constructors();
 
-    console_endboot();
+    console_endboot(initial_domain->domain_id);
 
     /* Hide UART from DOM0 if we're using it */
     serial_endboot();
 
     dmi_end_boot();
 
-    setup_io_bitmap(dom0);
+    setup_io_bitmap(hardware_domain);
 
     if ( bsp_delay_spec_ctrl )
     {

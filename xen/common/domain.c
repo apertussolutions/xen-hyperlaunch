@@ -66,8 +66,8 @@ struct domain *domain_list;
 
 struct domain *hardware_domain __read_mostly;
 
-#ifdef CONFIG_LATE_HWDOM
 domid_t hardware_domid __read_mostly;
+#ifdef CONFIG_LATE_HWDOM
 integer_param("hardware_dom", hardware_domid);
 #endif
 
@@ -910,6 +910,8 @@ int domain_kill(struct domain *d)
         argo_destroy(d);
         gnttab_release_mappings(d);
         vnuma_destroy(d->vnuma);
+        if ( d->domain_id == DOMID_BOOT_DOMAIN )
+            console_to_hwdom();
         domain_set_outstanding_pages(d, 0);
         /* fallthrough */
     case DOMDYING_dying:
