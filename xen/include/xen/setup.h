@@ -95,8 +95,28 @@ struct hyperlaunch_config {
 
 #ifdef CONFIG_HYPERLAUNCH
 extern bool hyperlaunch_enabled;
-#else
-#define hyperlaunch_enabled false
+
+int __init hyperlaunch_init(const void *fdt);
+
+#ifdef CONFIG_MULTIBOOT
+bool __init hyperlaunch_mb_init(module_t *mods);
 #endif
 
+#else /* CONFIG_HYPERLAUNCH */
+
+#define hyperlaunch_enabled false
+
+static inline int __init hyperlaunch_init(const void *fdt)
+{
+    return 0;
+}
+
+#ifdef CONFIG_MULTIBOOT
+static inline bool __init hyperlaunch_mb_init(module_t *mods)
+{
+    return false;
+}
+#endif
+
+#endif /* CONFIG_HYPERLAUNCH */
 #endif /* XEN_SETUP_H */
