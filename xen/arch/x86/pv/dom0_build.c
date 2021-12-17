@@ -296,7 +296,6 @@ static struct page_info * __init alloc_chunk(struct domain *d,
 
 int __init dom0_construct_pv(struct domain *d,
                              const module_t *image,
-                             unsigned long image_headroom,
                              module_t *initrd,
                              char *cmdline)
 {
@@ -315,7 +314,7 @@ int __init dom0_construct_pv(struct domain *d,
     struct vcpu *v = d->vcpu[0];
     void *image_base = bootstrap_map(image);
     unsigned long image_len = image->mod_end;
-    void *image_start = image_base + image_headroom;
+    void *image_start = image_base + image->headroom;
     unsigned long initrd_len = initrd ? initrd->mod_end : 0;
     l4_pgentry_t *l4tab = NULL, *l4start = NULL;
     l3_pgentry_t *l3tab = NULL, *l3start = NULL;

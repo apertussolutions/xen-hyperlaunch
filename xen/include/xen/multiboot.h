@@ -108,7 +108,8 @@ typedef struct {
     u32 mod_start;
     u32 mod_end;
     u32 string;
-    u32 reserved;
+    u32 reserved:1;
+    u32 headroom:31;
 } module_t;
 
 /* The memory map. Be careful that the offset 0 is base_addr_low

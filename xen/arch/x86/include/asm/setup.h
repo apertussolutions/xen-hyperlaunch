@@ -36,7 +36,7 @@ static inline void vesa_mtrr_init(void) {};
 
 int construct_dom0(
     struct domain *d,
-    const module_t *kernel, unsigned long kernel_headroom,
+    const module_t *kernel,
     module_t *initrd,
     char *cmdline);
 void setup_io_bitmap(struct domain *d);

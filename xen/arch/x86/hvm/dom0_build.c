@@ -537,12 +537,11 @@ static paddr_t __init find_memory(
 }
 
 static int __init pvh_load_kernel(struct domain *d, const module_t *image,
-                                  unsigned long image_headroom,
                                   module_t *initrd, void *image_base,
                                   char *cmdline, paddr_t *entry,
                                   paddr_t *start_info_addr)
 {
-    void *image_start = image_base + image_headroom;
+    void *image_start = image_base + image->headroom;
     unsigned long image_len = image->mod_end;
     struct elf_binary elf;
     struct elf_dom_parms parms;
@@ -1210,7 +1209,6 @@ static void __hwdom_init pvh_setup_mmcfg(struct domain *d)
 }
 
 int __init dom0_construct_pvh(struct domain *d, const module_t *image,
-                              unsigned long image_headroom,
                               module_t *initrd,
                               char *cmdline)
 {
@@ -1242,7 +1240,7 @@ int __init dom0_construct_pvh(struct domain *d, const module_t *image,
         return rc;
     }
 
-    rc = pvh_load_kernel(d, image, image_headroom, initrd, bootstrap_map(image),
+    rc = pvh_load_kernel(d, image, initrd, bootstrap_map(image),
                          cmdline, &entry, &start_info);
     if ( rc )
     {

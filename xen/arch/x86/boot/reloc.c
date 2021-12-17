@@ -250,6 +250,7 @@ static multiboot_info_t *mbi2_reloc(u32 mbi_in)
             mbi_out_mods[mod_idx].mod_end = get_mb2_data(tag, module, mod_end);
             ptr = get_mb2_string(tag, module, cmdline);
             mbi_out_mods[mod_idx].string = copy_string(ptr);
+            mbi_out_mods[mod_idx].headroom = 0;
             mbi_out_mods[mod_idx].reserved = 0;
             ++mod_idx;
             break;
