@@ -31,8 +31,12 @@ config HAS_ALTERNATIVE
 config HAS_COMPAT
 	bool
 
+config CORE_DEVICE_TREE
+	bool
+
 config HAS_DEVICE_TREE
 	bool
+	select CORE_DEVICE_TREE
 
 config HAS_EX_TABLE
 	bool
@@ -333,6 +337,7 @@ config ARGO
 
 config HYPERLAUNCH
 	bool "Hyperlaunch support (UNSUPPORTED)" if UNSUPPORTED
+	select CORE_DEVICE_TREE
 	---help---
 	  Enables launch of multiple VMs at host boot as an alternative
 	  method of starting a Xen system.
