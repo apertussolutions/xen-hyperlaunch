@@ -35,6 +35,7 @@ obj-y += rangeset.o
 obj-y += radix-tree.o
 obj-y += rcupdate.o
 obj-y += rwlock.o
+obj-y += setup.o
 obj-y += shutdown.o
 obj-y += softirq.o
 obj-y += smp.o

@@ -26,6 +26,7 @@
 #include <xen/nodemask.h>
 #include <xen/virtual_region.h>
 #include <xen/watchdog.h>
+#include <xen/setup.h>
 #include <public/version.h>
 #ifdef CONFIG_COMPAT
 #include <compat/platform.h>
@@ -1891,7 +1892,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
            cpu_has_nx ? "" : "not ");
 
     initrdidx = find_first_bit(module_map, mbi->mods_count);
-    if ( bitmap_weight(module_map, mbi->mods_count) > 1 )
+    if ( !hyperlaunch_enabled &&
+         bitmap_weight(module_map, mbi->mods_count) > 1 )
         printk(XENLOG_WARNING
                "Multiple initrd candidates, picking module #%u\n",
                initrdidx);

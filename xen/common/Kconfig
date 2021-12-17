@@ -331,6 +331,16 @@ config ARGO
 
 	  If unsure, say N.
 
+config HYPERLAUNCH
+	bool "Hyperlaunch support (UNSUPPORTED)" if UNSUPPORTED
+	---help---
+	  Enables launch of multiple VMs at host boot as an alternative
+	  method of starting a Xen system.
+
+	  This feature is currently experimental.
+
+	  If unsure, say N.
+
 source "common/sched/Kconfig"
 
 config CRYPTO
