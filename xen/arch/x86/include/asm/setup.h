@@ -34,6 +34,10 @@ static inline void vesa_init(void) {};
 static inline void vesa_mtrr_init(void) {};
 #endif
 
+struct domain *__init create_dom0(
+    const module_t *image, module_t *initrd, const char *kextra,
+    const char *loader);
+
 int construct_dom0(
     struct domain *d,
     const module_t *kernel,

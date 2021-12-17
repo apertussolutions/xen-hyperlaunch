@@ -755,9 +755,9 @@ static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int li
     return n;
 }
 
-static struct domain *__init create_dom0(const module_t *image,
-                                  module_t *initrd, const char *kextra,
-                                  const char *loader)
+struct domain *__init create_dom0(
+    const module_t *image, module_t *initrd, const char *kextra,
+    const char *loader)
 {
     struct xen_domctl_createdomain dom0_cfg = {
         .flags = IS_ENABLED(CONFIG_TBOOT) ? XEN_DOMCTL_CDF_s3_integrity : 0,
