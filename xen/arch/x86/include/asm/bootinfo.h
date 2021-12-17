@@ -45,6 +45,8 @@ struct __packed mb_memmap {
     uint32_t type;
 };
 
+struct arch_domain_builder { };
+
 static inline bool loader_is_grub2(const char *loader_name)
 {
     /* GRUB1="GNU GRUB 0.xx"; GRUB2="GRUB 1.xx" */

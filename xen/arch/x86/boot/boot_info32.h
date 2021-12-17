@@ -87,6 +87,9 @@ struct __packed boot_info {
     /* struct boot_module* */
     u64 mods;
 
+    /* struct domain_builder* */
+    u64 builder;
+
     /* struct arch_boot_info* */
     u64 arch;
 };

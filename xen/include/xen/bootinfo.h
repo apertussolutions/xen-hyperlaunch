@@ -1,6 +1,7 @@
 #ifndef __XEN_BOOTINFO_H__
 #define __XEN_BOOTINFO_H__
 
+#include <xen/bootdomain.h>
 #include <xen/mm.h>
 #include <xen/types.h>
 
@@ -15,6 +16,7 @@ typedef enum {
     BOOTMOD_XSM,
     BOOTMOD_UCODE,
     BOOTMOD_GUEST_DTB,
+    BOOTMOD_GUEST_CONF,
 }  bootmodule_kind;
 
 typedef enum {
@@ -47,6 +49,8 @@ struct __packed boot_info {
 
     uint32_t nr_mods;
     struct boot_module *mods;
+
+    struct domain_builder *builder;
 
     struct arch_boot_info *arch;
 };

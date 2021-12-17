@@ -4,6 +4,7 @@
  * Copyright (c) 2002-2005, K A Fraser
  */
 
+#include <xen/bootdomain.h>
 #include <xen/bootinfo.h>
 #include <xen/init.h>
 #include <xen/iocap.h>
@@ -22,30 +23,10 @@
 #include <asm/setup.h>
 #include <asm/spec_ctrl.h>
 
-struct memsize {
-    long nr_pages;
-    unsigned int percent;
-    bool minus;
-};
-
 static struct memsize __initdata dom0_size;
 static struct memsize __initdata dom0_min_size;
 static struct memsize __initdata dom0_max_size = { .nr_pages = LONG_MAX };
 static bool __initdata dom0_mem_set;
-
-static bool __init memsize_gt_zero(const struct memsize *sz)
-{
-    return !sz->minus && sz->nr_pages;
-}
-
-static unsigned long __init get_memsize(const struct memsize *sz,
-                                        unsigned long avail)
-{
-    unsigned long pages;
-
-    pages = sz->nr_pages + sz->percent * avail / 100;
-    return sz->minus ? avail - pages : pages;
-}
 
 /*
  * dom0_mem=[min:<min_amt>,][max:<max_amt>,][<amt>]
