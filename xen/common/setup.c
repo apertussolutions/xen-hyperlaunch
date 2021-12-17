@@ -7,6 +7,9 @@
 #include <xen/setup.h>
 #include <xen/types.h>
 
+#include <asm/bzimage.h> /* for bzimage_headroom */
+#include <asm/setup.h>
+
 #ifdef CONFIG_HYPERLAUNCH
 
 bool __initdata hyperlaunch_enabled;
@@ -271,6 +274,81 @@ bool __init hyperlaunch_mb_init(module_t *mods)
 
     return ret;
 }
+
+void __init hyperlaunch_mb_headroom(void)
+{
+    int i,j;
+
+    for( i = 0; i < hl_config.nr_doms; i++ )
+    {
+        for ( j = 0; j < hl_config.domains[i].nr_mods; j++ )
+        {
+            if ( hl_config.domains[i].modules[j].kind == BOOTMOD_KERNEL )
+            {
+                module_t *kern =
+                    (module_t *)_p(hl_config.domains[i].modules[j].start);
+
+                kern->headroom = bzimage_headroom(bootstrap_map(kern),
+                                                  kern->mod_end);
+                bootstrap_map(NULL);
+            }
+        }
+    }
+}
 #endif
+
+uint32_t __init hyperlaunch_create_domains(
+    struct domain **hwdom, const char *kextra, const char *loader)
+{
+    uint32_t dom_count = 0, functions_used = 0;
+    int i;
+
+    *hwdom = NULL;
+
+    for ( i = 0; i < hl_config.nr_doms; i++ )
+    {
+        struct bootdomain *d = &(hl_config.domains[i]);
+
+        /* build a legacy dom0 and set it as the hwdom */
+        if ( (d->functions & HL_FUNCTION_LEGACY_DOM0) &&
+             !(functions_used & HL_FUNCTION_LEGACY_DOM0) )
+        {
+            module_t *image = NULL, *initrd = NULL;
+            int j;
+
+            for ( j = 0; j < d->nr_mods; j++ )
+            {
+                if ( d->modules[j].kind == BOOTMOD_KERNEL )
+                    image = (module_t *)_p(d->modules[j].start);
+
+                if ( d->modules[j].kind == BOOTMOD_RAMDISK )
+                    initrd = (module_t *)_p(d->modules[j].start);
+
+                if ( image && initrd )
+                    break;
+            }
+
+            if ( image == NULL )
+                return 0;
+
+#ifdef CONFIG_MULTIBOOT
+            *hwdom = create_dom0(image, initrd, kextra, loader);
+#endif
+            if ( *hwdom )
+            {
+                functions_used |= HL_FUNCTION_LEGACY_DOM0;
+                dom_count++;
+            }
+            else
+                panic("HYPERLAUNCH: "
+                      "Dom0 config present but dom0 construction failed\n");
+        }
+        else
+            printk(XENLOG_WARNING "hyperlaunch: "
+                   "currently only supports classic dom0 construction");
+    }
+
+    return dom_count;
+}
 
 #endif
