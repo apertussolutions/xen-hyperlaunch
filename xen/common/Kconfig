@@ -31,8 +31,12 @@ config HAS_ALTERNATIVE
 config HAS_COMPAT
 	bool
 
+config CORE_DEVICE_TREE
+	bool
+
 config HAS_DEVICE_TREE
 	bool
+	select CORE_DEVICE_TREE
 
 config HAS_EX_TABLE
 	bool
