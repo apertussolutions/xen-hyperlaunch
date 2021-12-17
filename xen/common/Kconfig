@@ -355,6 +355,7 @@ config ARGO
 
 	  If unsure, say N.
 
+source "common/domain-builder/Kconfig"
 source "common/sched/Kconfig"
 
 config CRYPTO

@@ -1,0 +1,15 @@
+
+menu "Domain Builder Features"
+
+config BUILDER_FDT
+	bool "Domain builder device tree (UNSUPPORTED)" if UNSUPPORTED
+	select CORE_DEVICE_TREE
+	---help---
+	  Enables the ability to configure the domain builder using a
+	  flattened device tree.
+
+	  This feature is currently experimental.
+
+	  If unsure, say N.
+
+endmenu
