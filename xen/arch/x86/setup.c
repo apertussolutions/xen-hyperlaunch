@@ -1019,6 +1019,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
     bitmap_fill(module_map, mbi->mods_count);
     __clear_bit(0, module_map); /* Dom0 kernel is always first */
 
+    if ( hyperlaunch_mb_init(mod) )
+        printk(XENLOG_INFO "Hyperlaunch enabled\n");
+
     if ( pvh_boot )
     {
         /* pvh_init() already filled in e820_raw */
@@ -1158,8 +1161,12 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         mod[mbi->mods_count].mod_end = __2M_rwdata_end - _stext;
     }
 
-    mod->headroom = bzimage_headroom(bootstrap_map(mod), mod->mod_end);
-    bootstrap_map(NULL);
+    if ( hyperlaunch_enabled ) {
+        hyperlaunch_mb_headroom();
+    } else {
+        mod->headroom = bzimage_headroom(bootstrap_map(mod), mod->mod_end);
+        bootstrap_map(NULL);
+    }
 
 #ifndef highmem_start
     /* Don't allow split below 4Gb. */
@@ -1890,22 +1897,34 @@ void __init noreturn __start_xen(unsigned long mbi_p)
            cpu_has_nx ? XENLOG_INFO : XENLOG_WARNING "Warning: ",
            cpu_has_nx ? "" : "not ");
 
-    initrdidx = find_first_bit(module_map, mbi->mods_count);
-    if ( !hyperlaunch_enabled &&
-         bitmap_weight(module_map, mbi->mods_count) > 1 )
-        printk(XENLOG_WARNING
-               "Multiple initrd candidates, picking module #%u\n",
-               initrdidx);
+    if ( hyperlaunch_enabled )
+    {
+        uint32_t ndoms;
 
-    /*
-     * We're going to setup domain0 using the module(s) that we stashed safely
-     * above our heap. The second module, if present, is an initrd ramdisk.
-     */
-    dom0 = create_dom0(mod,
-                       initrdidx < mbi->mods_count ? mod + initrdidx : NULL,
-                       kextra, loader);
-    if ( !dom0 )
-        panic("Could not set up DOM0 guest OS\n");
+        printk(XENLOG_INFO "Hyperlaunch starting domain construction...\n");
+        ndoms = hyperlaunch_create_domains(&dom0, kextra, loader);
+        if ( ndoms == 0 )
+            panic("Hyperlaunch could not set up the domains\n");
+
+        printk(XENLOG_INFO "Hyperlaunch created %u domains\n", ndoms);
+    } else {
+        initrdidx = find_first_bit(module_map, mbi->mods_count);
+        if ( bitmap_weight(module_map, mbi->mods_count) > 1 )
+            printk(XENLOG_WARNING
+                   "Multiple initrd candidates, picking module #%u\n",
+                   initrdidx);
+
+        /*
+         * We're going to setup domain0 using the module(s) that we stashed
+         * safely above our heap. The second module, if present, is an initrd
+         * ramdisk.
+         */
+        dom0 = create_dom0(mod,
+                           initrdidx < mbi->mods_count ? mod + initrdidx : NULL,
+                           kextra, loader);
+        if ( !dom0 )
+            panic("Could not set up DOM0 guest OS\n");
+    }
 
     heap_init_late();
 
