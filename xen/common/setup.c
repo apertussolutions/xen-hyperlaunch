@@ -1,4 +1,6 @@
+#include <xen/err.h>
 #include <xen/fdt.h>
+#include <xen/grant_table.h>
 #include <xen/init.h>
 #include <xen/lib.h>
 #include <xen/libfdt/libfdt.h>
@@ -6,8 +8,10 @@
 #include <xen/page-size.h>
 #include <xen/setup.h>
 #include <xen/types.h>
+#include <public/domctl.h>
 
 #include <asm/bzimage.h> /* for bzimage_headroom */
+#include <asm/pv/shim.h>
 #include <asm/setup.h>
 
 /*
@@ -301,7 +305,166 @@ void __init hyperlaunch_mb_headroom(void)
         }
     }
 }
+
+static bool __init handle_mb_kernel(struct bootdomain *bd, const char *loader)
+{
+    struct bootmodule *bm;
+    module_t *image = NULL;
+
+    if ( (bm = bootmodule_by_type(bd, BOOTMOD_KERNEL)) == NULL )
+        return false; /* TODO: add printk statement */
+
+    if ( (image = (module_t *)_p(bm->start)) == NULL )
+        return false; /* TODO: add printk statement */
+
+    if ( image->string )
+    {
+        char *cmdline = image->string ? __va(image->string) : NULL;
+        cmdline = cmdline_cook(cmdline, loader);
+        safe_strcat(bd->cmdline, cmdline);
+    }
+
+    return true;
+}
 #endif
+
+static domid_t __init get_next_domid(void)
+{
+    static domid_t last_domid = 0;
+    domid_t next;
+
+    for ( next = last_domid + 1; next < DOMID_FIRST_RESERVED; next++ )
+    {
+        struct domain *d;
+
+        if ( (d = rcu_lock_domain_by_id(next)) == NULL )
+        {
+            last_domid = next;
+            return next;
+        }
+
+        rcu_unlock_domain(d);
+    }
+
+    return 0;
+}
+
+static struct domain *__init create_domain(
+    struct bootdomain *bd, const char *kextra, const char *loader)
+{
+    /* start off with some standard/common defaults */
+    struct xen_domctl_createdomain dom_cfg = {
+        .max_evtchn_port = -1,
+        .max_grant_frames = -1,
+        .max_maptrack_frames = -1,
+        .grant_opts = XEN_DOMCTL_GRANT_version(opt_gnttab_max_version),
+    };
+    struct domain *d;
+    bool is_privileged;
+
+#ifdef CONFIG_MULTIBOOT
+    if ( !handle_mb_kernel(bd, loader) )
+        return NULL;
+#endif
+
+    /* mask out PV and device model bits, if 0 then the domain is PVH */
+    if ( !(bd->mode & (HL_MODE_PARAVIRTUALIZED|HL_MODE_ENABLE_DEVICE_MODEL)) )
+    {
+        dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm |
+                         (hvm_hap_supported() ? XEN_DOMCTL_CDF_hap : 0));
+
+        /* TODO: review which flags should be present */
+        dom_cfg.arch.emulation_flags |=
+            XEN_X86_EMU_LAPIC | XEN_X86_EMU_IOAPIC | XEN_X86_EMU_VPCI;
+    }
+
+    if ( iommu_enabled && (bd->permissions & HL_PERMISSION_HARDWARE) )
+        dom_cfg.flags |= XEN_DOMCTL_CDF_iommu;
+
+    if ( kextra )
+        /* kextra always includes exactly one leading space. */
+        safe_strcat(bd->cmdline, kextra);
+
+    arch_dom_acpi(bd);
+
+    /* configure a legacy dom0 */
+    if ( (bd->functions & HL_FUNCTION_LEGACY_DOM0) )
+    {
+        domid_t dom0id = get_initial_domain_id();
+
+        dom_cfg.flags |= IS_ENABLED(CONFIG_TBOOT) ? XEN_DOMCTL_CDF_s3_integrity : 0;
+        dom_cfg.max_vcpus = dom0_max_vcpus();
+        dom_cfg.arch.misc_flags = opt_dom0_msr_relaxed ? XEN_X86_MSR_RELAXED : 0;
+
+        /* Force dom0 to be PVH regardless of hyperlaunch config */
+        if ( opt_dom0_pvh )
+        {
+            dom_cfg.flags |= (XEN_DOMCTL_CDF_hvm |
+                             ((hvm_hap_supported() && !opt_dom0_shadow) ?
+                              XEN_DOMCTL_CDF_hap : 0));
+
+            dom_cfg.arch.emulation_flags |=
+                XEN_X86_EMU_LAPIC | XEN_X86_EMU_IOAPIC | XEN_X86_EMU_VPCI;
+        }
+
+        if ( iommu_enabled )
+            dom_cfg.flags |= XEN_DOMCTL_CDF_iommu;
+
+        bd->domid = bd->domid == 0 ? dom0id : bd->domid;
+        is_privileged = true;
+    } else {
+        /*
+         * doing under else as to not burn a domid when legacy dom0 is
+         * being constructed
+         */
+        bd->domid = bd->domid == 0 ? get_next_domid() : bd->domid;
+        if ( bd->domid == 0 )
+            panic("hyperlaunch: unable to allocate domain ids\n");
+        is_privileged = !!(bd->permissions & HL_PERMISSION_CONTROL);
+    }
+
+    is_privileged = pv_shim ? false : is_privileged;
+
+    /* Create domain reference */
+    d = domain_create(bd->domid, &dom_cfg, is_privileged);
+    if ( IS_ERR(d) )
+        return NULL;
+
+    /* construct a legacy dom0 */
+    if ( (bd->functions & HL_FUNCTION_LEGACY_DOM0) )
+    {
+        unsigned long cr4_pv32_mask;
+
+        hardware_domain = d;
+
+        if ( alloc_dom0_vcpu0(d) == NULL )
+            panic("Error allocating VCPU for a Domain0\n");
+
+        /*
+         * Temporarily clear SMAP in CR4 to allow user-accesses in
+         * construct_domain(). This saves a large number of corner cases
+         * interactions with copy_from_user().
+         */
+        if ( cpu_has_smap )
+        {
+            cr4_pv32_mask &= ~X86_CR4_SMAP;
+            write_cr4(read_cr4() & ~X86_CR4_SMAP);
+        }
+
+        if ( construct_domain(d, bd) != 0 )
+            panic("Could not construct domain 0\n");
+
+        if ( cpu_has_smap )
+        {
+            write_cr4(read_cr4() | X86_CR4_SMAP);
+            cr4_pv32_mask |= X86_CR4_SMAP;
+        }
+    }
+    else
+        panic("hyperlaunch: does not support non-dom0 construction");
+
+    return d;
+}
 
 uint32_t __init hyperlaunch_create_domains(
     struct domain **hwdom, const char *kextra, const char *loader)
@@ -313,45 +476,24 @@ uint32_t __init hyperlaunch_create_domains(
 
     for ( i = 0; i < hl_config.nr_doms; i++ )
     {
-        struct bootdomain *d = &(hl_config.domains[i]);
+        struct bootdomain *bd = &(hl_config.domains[i]);
+        struct domain *d;
+
+        d = create_domain(bd, kextra, loader);
+        if ( !d )
+            panic("HYPERLAUNCH: "
+                  "Domain config present but construction failed\n");
 
         /* build a legacy dom0 and set it as the hwdom */
-        if ( (d->functions & HL_FUNCTION_LEGACY_DOM0) &&
+        if ( (bd->functions & HL_FUNCTION_LEGACY_DOM0) &&
              !(functions_used & HL_FUNCTION_LEGACY_DOM0) )
         {
-            module_t *image = NULL, *initrd = NULL;
-            int j;
+            *hwdom = d;
 
-            for ( j = 0; j < d->nr_mods; j++ )
-            {
-                if ( d->modules[j].kind == BOOTMOD_KERNEL )
-                    image = (module_t *)_p(d->modules[j].start);
-
-                if ( d->modules[j].kind == BOOTMOD_RAMDISK )
-                    initrd = (module_t *)_p(d->modules[j].start);
-
-                if ( image && initrd )
-                    break;
-            }
-
-            if ( image == NULL )
-                return 0;
-
-#ifdef CONFIG_MULTIBOOT
-            *hwdom = create_dom0(image, initrd, kextra, loader);
-#endif
-            if ( *hwdom )
-            {
-                functions_used |= HL_FUNCTION_LEGACY_DOM0;
-                dom_count++;
-            }
-            else
-                panic("HYPERLAUNCH: "
-                      "Dom0 config present but dom0 construction failed\n");
+            functions_used |= HL_FUNCTION_LEGACY_DOM0;
         }
-        else
-            printk(XENLOG_WARNING "hyperlaunch: "
-                   "currently only supports classic dom0 construction");
+
+        dom_count++;
     }
 
     return dom_count;

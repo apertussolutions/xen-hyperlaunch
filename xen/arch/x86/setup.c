@@ -739,34 +739,6 @@ ignore_param("edid");
  */
 ignore_param("placeholder");
 
-static bool __init loader_is_grub2(const char *loader_name)
-{
-    /* GRUB1="GNU GRUB 0.xx"; GRUB2="GRUB 1.xx" */
-    const char *p = strstr(loader_name, "GRUB ");
-    return (p != NULL) && (p[5] != '0');
-}
-
-static char * __init cmdline_cook(char *p, const char *loader_name)
-{
-    p = p ? : "";
-
-    /* Strip leading whitespace. */
-    while ( *p == ' ' )
-        p++;
-
-    /* GRUB2 and PVH don't not include image name as first item on command line. */
-    if ( xen_guest || loader_is_grub2(loader_name) )
-        return p;
-
-    /* Strip image name plus whitespace. */
-    while ( (*p != ' ') && (*p != '\0') )
-        p++;
-    while ( *p == ' ' )
-        p++;
-
-    return p;
-}
-
 static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int limit)
 {
     unsigned int n = min(bootsym(bios_e820nr), limit);

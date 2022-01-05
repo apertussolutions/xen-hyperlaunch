@@ -579,7 +579,7 @@ int __init construct_domain(struct domain *d, struct bootdomain *bd)
     int rc = 0;
 
     /* Sanity! */
-    BUG_ON(!pv_shim && d->domain_id != 0);
+//    BUG_ON(!pv_shim && d->domain_id != 0);
     BUG_ON(d->vcpu[0] == NULL);
     BUG_ON(d->vcpu[0]->is_initialised);
 
