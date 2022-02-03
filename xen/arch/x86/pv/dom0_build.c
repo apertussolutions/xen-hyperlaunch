@@ -32,8 +32,8 @@
 #define L3_PROT (BASE_PROT|_PAGE_DIRTY)
 #define L4_PROT (BASE_PROT|_PAGE_DIRTY)
 
-void __init dom0_update_physmap(bool compat, unsigned long pfn,
-                                unsigned long mfn, unsigned long vphysmap_s)
+void __init dom_update_physmap(
+    bool compat, unsigned long pfn, unsigned long mfn, unsigned long vphysmap_s)
 {
     if ( !compat )
         ((unsigned long *)vphysmap_s)[pfn] = mfn;
@@ -814,7 +814,7 @@ int __init dom0_construct_pv(struct domain *d,
         if ( pfn > REVERSE_START && (vinitrd_start || pfn < initrd_pfn) )
             mfn = alloc_epfn - (pfn - REVERSE_START);
 #endif
-        dom0_update_physmap(compat, pfn, mfn, vphysmap_start);
+        dom_update_physmap(compat, pfn, mfn, vphysmap_start);
         if ( !(pfn & 0xfffff) )
             process_pending_softirqs();
     }
@@ -830,7 +830,7 @@ int __init dom0_construct_pv(struct domain *d,
                  !get_page_and_type(page, d, PGT_writable_page) )
                 BUG();
 
-            dom0_update_physmap(compat, pfn, mfn, vphysmap_start);
+            dom_update_physmap(compat, pfn, mfn, vphysmap_start);
             ++pfn;
             if ( !(pfn & 0xfffff) )
                 process_pending_softirqs();
@@ -850,7 +850,7 @@ int __init dom0_construct_pv(struct domain *d,
 #ifndef NDEBUG
 #define pfn (nr_pages - 1 - (pfn - (alloc_epfn - alloc_spfn)))
 #endif
-            dom0_update_physmap(compat, pfn, mfn, vphysmap_start);
+            dom_update_physmap(compat, pfn, mfn, vphysmap_start);
 #undef pfn
             page++; pfn++;
             if ( !(pfn & 0xfffff) )
