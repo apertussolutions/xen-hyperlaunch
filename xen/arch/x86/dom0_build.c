@@ -325,7 +325,6 @@ unsigned long __init dom0_paging_pages(const struct domain *d,
     return ((memkb + 1023) / 1024) << (20 - PAGE_SHIFT);
 }
 
-
 /*
  * If allocation isn't specified, reserve 1/16th of available memory for
  * things like DMA buffers. This reservation is clamped to a maximum of 128MB.
@@ -336,17 +335,24 @@ static unsigned long __init default_nr_pages(unsigned long avail)
                             : min(avail / 16, 128UL << (20 - PAGE_SHIFT)));
 }
 
-unsigned long __init dom0_compute_nr_pages(
-    struct domain *d, struct elf_dom_parms *parms, unsigned long initrd_len)
+static unsigned long __init avail_nr_pages(struct domain *d, nodemask_t nodes)
 {
+    unsigned long avail = 0, iommu_pages = 0;
+    bool is_ctldom = false, is_hwdom = false;
+    unsigned long nr_pages = current_bootdomain->mem_size.nr_pages;
     nodeid_t node;
-    unsigned long avail = 0, nr_pages, min_pages, max_pages, iommu_pages = 0;
 
-    /* The ordering of operands is to work around a clang5 issue. */
-    if ( CONFIG_DOM0_MEM[0] && !dom0_mem_set )
-        parse_dom0_mem(CONFIG_DOM0_MEM);
+    if ( current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 )
+    {
+        is_ctldom = true;
+        is_hwdom = true;
+    }
+    else if ( current_bootdomain->permissions & HL_PERMISSION_CONTROL )
+        is_ctldom = true;
+    else if ( current_bootdomain->permissions & HL_PERMISSION_HARDWARE )
+        is_hwdom = true;
 
-    for_each_node_mask ( node, dom0_nodes )
+    for_each_node_mask ( node, nodes )
         avail += avail_domheap_pages_region(node, 0, 0) +
                  initial_images_nrpages(node);
 
@@ -358,7 +364,7 @@ unsigned long __init dom0_compute_nr_pages(
         avail -= d->max_vcpus - 1;
 
     /* Reserve memory for iommu_dom0_init() (rough estimate). */
-    if ( is_iommu_enabled(d) && !iommu_hwdom_passthrough )
+    if ( is_hwdom && is_iommu_enabled(d) && !iommu_hwdom_passthrough )
     {
         unsigned int s;
 
@@ -368,21 +374,11 @@ unsigned long __init dom0_compute_nr_pages(
         avail -= iommu_pages;
     }
 
-    if ( paging_mode_enabled(d) || opt_dom0_shadow || opt_pv_l1tf_hwdom )
+    if ( paging_mode_enabled(d) || 
+         (is_ctldom && opt_dom0_shadow) ||
+         (is_hwdom && opt_pv_l1tf_hwdom) )
     {
-        unsigned long cpu_pages;
-
-        nr_pages = get_memsize(&dom0_size, avail) ?: default_nr_pages(avail);
-
-        /*
-         * Clamp according to min/max limits and available memory
-         * (preliminary).
-         */
-        nr_pages = max(nr_pages, get_memsize(&dom0_min_size, avail));
-        nr_pages = min(nr_pages, get_memsize(&dom0_max_size, avail));
-        nr_pages = min(nr_pages, avail);
-
-        cpu_pages = dom0_paging_pages(d, nr_pages);
+        unsigned long cpu_pages = dom0_paging_pages(d, nr_pages);
 
         if ( !iommu_use_hap_pt(d) )
             avail -= cpu_pages;
@@ -390,14 +386,23 @@ unsigned long __init dom0_compute_nr_pages(
             avail -= cpu_pages - iommu_pages;
     }
 
+    return avail;
+}
+
+unsigned long __init dom0_compute_nr_pages(
+    struct domain *d, struct elf_dom_parms *parms, unsigned long initrd_len)
+{
+    unsigned long avail, nr_pages, min_pages, max_pages;
+
+    /* The ordering of operands is to work around a clang5 issue. */
+    if ( CONFIG_DOM0_MEM[0] && !dom0_mem_set )
+        parse_dom0_mem(CONFIG_DOM0_MEM);
+
+    avail = avail_nr_pages(d, dom0_nodes);
+
     nr_pages = get_memsize(&dom0_size, avail) ?: default_nr_pages(avail);
     min_pages = get_memsize(&dom0_min_size, avail);
     max_pages = get_memsize(&dom0_max_size, avail);
-
-    /* Clamp according to min/max limits and available memory (final). */
-    nr_pages = max(nr_pages, min_pages);
-    nr_pages = min(nr_pages, max_pages);
-    nr_pages = min(nr_pages, avail);
 
     if ( is_pv_domain(d) &&
          (parms->p2m_base == UNSET_ADDR) && !memsize_gt_zero(&dom0_size) &&
@@ -433,7 +438,56 @@ unsigned long __init dom0_compute_nr_pages(
         }
     }
 
+    /* Clamp according to min/max limits and available memory (final). */
+    nr_pages = max(nr_pages, min_pages);
+    nr_pages = min(nr_pages, max_pages);
+    nr_pages = min(nr_pages, avail);
+
     d->max_pages = min_t(unsigned long, max_pages, UINT_MAX);
+
+    return nr_pages;
+}
+
+unsigned long __init dom_compute_nr_pages(
+    struct domain *d, struct elf_dom_parms *parms, unsigned long initrd_len)
+{
+    unsigned long nr_pages = current_bootdomain->mem_size.nr_pages;
+    unsigned long avail = avail_nr_pages(d, node_online_map);
+
+    if ( is_pv_domain(d) && (parms->p2m_base == UNSET_ADDR) )
+    {
+        /*
+         * Legacy Linux kernels (i.e. such without a XEN_ELFNOTE_INIT_P2M
+         * note) require that there is enough virtual space beyond the initial
+         * allocation to set up their initial page tables. This space is
+         * roughly the same size as the p2m table, so make sure the initial
+         * allocation doesn't consume more than about half the space that's
+         * available between params.virt_base and the address space end.
+         */
+        unsigned long vstart, vend, end;
+        size_t sizeof_long = is_pv_32bit_domain(d) ? sizeof(int) : sizeof(long);
+
+        vstart = parms->virt_base;
+        vend = round_pgup(parms->virt_kend);
+        if ( !parms->unmapped_initrd )
+            vend += round_pgup(initrd_len);
+        end = vend + nr_pages * sizeof_long;
+
+        if ( end > vstart )
+            end += end - vstart;
+        if ( end <= vstart ||
+             (sizeof_long < sizeof(end) && end > (1UL << (8 * sizeof_long))) )
+        {
+            end = sizeof_long >= sizeof(end) ? 0 : 1UL << (8 * sizeof_long);
+            nr_pages = (end - vend) / (2 * sizeof_long);
+            printk("Dom0 memory clipped to %lu pages\n", nr_pages);
+        }
+    }
+
+    /* Clamp according to available memory (final). */
+    nr_pages = min(nr_pages, avail);
+
+    d->max_pages = min_t(unsigned long, nr_pages, UINT_MAX);
 
     return nr_pages;
 }

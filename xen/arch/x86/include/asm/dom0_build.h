@@ -11,6 +11,10 @@ extern unsigned int dom0_memflags;
 unsigned long dom0_compute_nr_pages(struct domain *d,
                                     struct elf_dom_parms *parms,
                                     unsigned long initrd_len);
+
+unsigned long __init dom_compute_nr_pages(
+    struct domain *d, struct elf_dom_parms *parms, unsigned long initrd_len);
+
 int dom0_setup_permissions(struct domain *d);
 
 int dom0_construct_pv(struct domain *d);
