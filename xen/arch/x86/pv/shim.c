@@ -210,7 +210,7 @@ void __init pv_shim_setup_dom(struct domain *d, l4_pgentry_t *l4start,
     {                                                                          \
         share_xen_page_with_guest(mfn_to_page(_mfn(param)), d, SHARE_rw);      \
         replace_va_mapping(d, l4start, va, _mfn(param));                       \
-        dom0_update_physmap(compat,                                            \
+        dom_update_physmap(compat,                                             \
                             PFN_DOWN((va) - va_start), param, vphysmap);       \
     }                                                                          \
     else                                                                       \
@@ -238,7 +238,7 @@ void __init pv_shim_setup_dom(struct domain *d, l4_pgentry_t *l4start,
         si->console.domU.mfn = mfn_x(console_mfn);
         share_xen_page_with_guest(mfn_to_page(console_mfn), d, SHARE_rw);
         replace_va_mapping(d, l4start, console_va, console_mfn);
-        dom0_update_physmap(compat, (console_va - va_start) >> PAGE_SHIFT,
+        dom_update_physmap(compat, (console_va - va_start) >> PAGE_SHIFT,
                             mfn_x(console_mfn), vphysmap);
         consoled_set_ring_addr(page);
     }

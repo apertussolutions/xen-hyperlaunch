@@ -21,7 +21,7 @@ int dom0_construct_pvh(struct boot_domain *bd);
 unsigned long dom0_paging_pages(const struct domain *d,
                                 unsigned long nr_pages);
 
-void dom0_update_physmap(bool compat, unsigned long pfn,
+void dom_update_physmap(bool compat, unsigned long pfn,
                          unsigned long mfn, unsigned long vphysmap_s);
 
 #endif	/* _DOM0_BUILD_H_ */
