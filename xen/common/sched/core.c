@@ -3411,6 +3411,31 @@ void __init sched_setup_dom0_vcpus(struct domain *d)
 
     domain_update_node_affinity(d);
 }
+
+void __init sched_setup_dom_vcpus(struct domain *d)
+{
+    unsigned int i;
+    struct sched_unit *unit;
+
+    for ( i = 1; i < d->max_vcpus; i++ )
+        vcpu_create(d, i);
+
+    /*
+     * PV-shim: vcpus are pinned 1:1.
+     * Initially only 1 cpu is online, others will be dealt with when
+     * onlining them. This avoids pinning a vcpu to a not yet online cpu here.
+     */
+    if ( pv_shim )
+        sched_set_affinity(d->vcpu[0]->sched_unit,
+                           cpumask_of(0), cpumask_of(0));
+    else
+    {
+        for_each_sched_unit ( d, unit )
+            sched_set_affinity(unit, NULL, cpupool_valid_cpus(cpupool0));
+    }
+
+    domain_update_node_affinity(d);
+}
 #endif
 
 #ifdef CONFIG_COMPAT

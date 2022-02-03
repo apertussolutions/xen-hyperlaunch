@@ -259,6 +259,14 @@ struct vcpu *__init alloc_dom0_vcpu0(struct domain *dom0)
     return vcpu_create(dom0, 0);
 }
 
+struct vcpu *__init alloc_dom_vcpu0(struct domain *d)
+{
+    d->node_affinity = node_online_map;
+    d->auto_node_affinity = true;
+
+    return vcpu_create(d, 0);
+}
+
 #ifdef CONFIG_SHADOW_PAGING
 bool __initdata opt_dom0_shadow;
 #endif
