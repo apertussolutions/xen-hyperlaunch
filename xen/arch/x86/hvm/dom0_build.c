@@ -412,15 +412,16 @@ static __init void pvh_setup_e820(struct domain *d, unsigned long nr_pages)
     ASSERT(cur_pages == nr_pages);
 }
 
-static void __init pvh_init_p2m(struct domain *d)
+static void __init pvh_init_p2m(struct boot_domain *bd)
 {
-    unsigned long nr_pages = dom0_compute_nr_pages(d, NULL, 0);
+    unsigned long nr_pages = dom_compute_nr_pages(bd, NULL, 0);
     bool preempted;
 
-    pvh_setup_e820(d, nr_pages);
+    pvh_setup_e820(bd->domain, nr_pages);
     do {
         preempted = false;
-        paging_set_allocation(d, dom0_paging_pages(d, nr_pages),
+        paging_set_allocation(bd->domain,
+                              dom0_paging_pages(bd->domain, nr_pages),
                               &preempted);
         process_pending_softirqs();
     } while ( preempted );
@@ -1239,7 +1240,7 @@ int __init dom0_construct_pvh(struct boot_domain *bd)
      * be done before the iommu initializion, since iommu initialization code
      * will likely add mappings required by devices to the p2m (ie: RMRRs).
      */
-    pvh_init_p2m(d);
+    pvh_init_p2m(bd);
 
     iommu_hwdom_init(d);
 

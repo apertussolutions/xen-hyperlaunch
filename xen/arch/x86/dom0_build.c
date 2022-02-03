@@ -320,69 +320,31 @@ static unsigned long __init default_nr_pages(unsigned long avail)
 }
 
 unsigned long __init dom0_compute_nr_pages(
-    struct domain *d, struct elf_dom_parms *parms, unsigned long initrd_len)
+    struct boot_domain *bd, struct elf_dom_parms *parms,
+    unsigned long initrd_len)
 {
-    nodeid_t node;
-    unsigned long avail = 0, nr_pages, min_pages, max_pages, iommu_pages = 0;
+    unsigned long avail, nr_pages, min_pages, max_pages;
 
     /* The ordering of operands is to work around a clang5 issue. */
     if ( CONFIG_DOM0_MEM[0] && !dom0_mem_set )
         parse_dom0_mem(CONFIG_DOM0_MEM);
 
-    for_each_node_mask ( node, dom0_nodes )
-        avail += avail_domheap_pages_region(node, 0, 0) +
-                 initial_images_nrpages(node);
+    avail = dom_avail_nr_pages(bd, dom0_nodes);
 
-    /* Reserve memory for further dom0 vcpu-struct allocations... */
-    avail -= (d->max_vcpus - 1UL)
-             << get_order_from_bytes(sizeof(struct vcpu));
-    /* ...and compat_l4's, if needed. */
-    if ( is_pv_32bit_domain(d) )
-        avail -= d->max_vcpus - 1;
-
-    /* Reserve memory for iommu_dom0_init() (rough estimate). */
-    if ( is_iommu_enabled(d) && !iommu_hwdom_passthrough )
+    /* command line overrides configuration */
+    if (  dom0_mem_set )
     {
-        unsigned int s;
-
-        for ( s = 9; s < BITS_PER_LONG; s += 9 )
-            iommu_pages += max_pdx >> s;
-
-        avail -= iommu_pages;
+        bd->meminfo.mem_size = dom0_size;
+        bd->meminfo.mem_min = dom0_min_size;
+        bd->meminfo.mem_max = dom0_max_size;
     }
 
-    if ( paging_mode_enabled(d) || opt_dom0_shadow || opt_pv_l1tf_hwdom )
-    {
-        unsigned long cpu_pages;
+    nr_pages = get_memsize(&bd->meminfo.mem_size, avail) ?
+               : default_nr_pages(avail);
+    min_pages = get_memsize(&bd->meminfo.mem_min, avail);
+    max_pages = get_memsize(&bd->meminfo.mem_max, avail);
 
-        nr_pages = get_memsize(&dom0_size, avail) ?: default_nr_pages(avail);
-
-        /*
-         * Clamp according to min/max limits and available memory
-         * (preliminary).
-         */
-        nr_pages = max(nr_pages, get_memsize(&dom0_min_size, avail));
-        nr_pages = min(nr_pages, get_memsize(&dom0_max_size, avail));
-        nr_pages = min(nr_pages, avail);
-
-        cpu_pages = dom0_paging_pages(d, nr_pages);
-
-        if ( !iommu_use_hap_pt(d) )
-            avail -= cpu_pages;
-        else if ( cpu_pages > iommu_pages )
-            avail -= cpu_pages - iommu_pages;
-    }
-
-    nr_pages = get_memsize(&dom0_size, avail) ?: default_nr_pages(avail);
-    min_pages = get_memsize(&dom0_min_size, avail);
-    max_pages = get_memsize(&dom0_max_size, avail);
-
-    /* Clamp according to min/max limits and available memory (final). */
-    nr_pages = max(nr_pages, min_pages);
-    nr_pages = min(nr_pages, max_pages);
-    nr_pages = min(nr_pages, avail);
-
-    if ( is_pv_domain(d) &&
+    if ( is_pv_domain(bd->domain) &&
          (parms->p2m_base == UNSET_ADDR) && !memsize_gt_zero(&dom0_size) &&
          (!memsize_gt_zero(&dom0_min_size) || (nr_pages > min_pages)) )
     {
@@ -395,7 +357,8 @@ unsigned long __init dom0_compute_nr_pages(
          * available between params.virt_base and the address space end.
          */
         unsigned long vstart, vend, end;
-        size_t sizeof_long = is_pv_32bit_domain(d) ? sizeof(int) : sizeof(long);
+        size_t sizeof_long = is_pv_32bit_domain(bd->domain) ?
+                             sizeof(int) : sizeof(long);
 
         vstart = parms->virt_base;
         vend = round_pgup(parms->virt_kend);
@@ -416,7 +379,12 @@ unsigned long __init dom0_compute_nr_pages(
         }
     }
 
-    d->max_pages = min_t(unsigned long, max_pages, UINT_MAX);
+    /* Clamp according to min/max limits and available memory (final). */
+    nr_pages = max(nr_pages, min_pages);
+    nr_pages = min(nr_pages, max_pages);
+    nr_pages = min(nr_pages, avail);
+
+    bd->domain->max_pages = min_t(unsigned long, max_pages, UINT_MAX);
 
     return nr_pages;
 }

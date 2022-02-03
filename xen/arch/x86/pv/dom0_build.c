@@ -428,7 +428,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
         }
     }
 
-    nr_pages = dom0_compute_nr_pages(d, &parms, initrd_len);
+    nr_pages = dom_compute_nr_pages(bd, &parms, initrd_len);
 
     if ( parms.pae == XEN_PAE_EXTCR3 )
             set_bit(VMASST_TYPE_pae_extended_cr3, &d->vm_assist);

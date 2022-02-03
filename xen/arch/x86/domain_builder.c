@@ -8,7 +8,9 @@
 #include <xen/sched.h>
 
 #include <asm/pv/shim.h>
+#include <asm/dom0_build.h>
 #include <asm/setup.h>
+#include <asm/spec_ctrl.h>
 
 extern unsigned long cr4_pv32_mask;
 
@@ -39,6 +41,106 @@ struct vcpu *__init alloc_dom_vcpu0(struct boot_domain *bd)
     return vcpu_create(bd->domain, 0);
 }
 
+
+unsigned long __init dom_avail_nr_pages(
+    struct boot_domain *bd, nodemask_t nodes)
+{
+    unsigned long avail = 0, iommu_pages = 0;
+    bool is_ctldom = false, is_hwdom = false;
+    unsigned long nr_pages = bd->meminfo.mem_size.nr_pages;
+    nodeid_t node;
+
+    if ( builder_is_ctldom(bd) )
+        is_ctldom = true;
+    if ( builder_is_hwdom(bd) )
+        is_hwdom = true;
+
+    for_each_node_mask ( node, nodes )
+        avail += avail_domheap_pages_region(node, 0, 0) +
+                 initial_images_nrpages(node);
+
+    /* Reserve memory for further dom0 vcpu-struct allocations... */
+    avail -= (bd->domain->max_vcpus - 1UL)
+             << get_order_from_bytes(sizeof(struct vcpu));
+    /* ...and compat_l4's, if needed. */
+    if ( is_pv_32bit_domain(bd->domain) )
+        avail -= bd->domain->max_vcpus - 1;
+
+    /* Reserve memory for iommu_dom0_init() (rough estimate). */
+    if ( is_hwdom && is_iommu_enabled(bd->domain) && !iommu_hwdom_passthrough )
+    {
+        unsigned int s;
+
+        for ( s = 9; s < BITS_PER_LONG; s += 9 )
+            iommu_pages += max_pdx >> s;
+
+        avail -= iommu_pages;
+    }
+
+    if ( paging_mode_enabled(bd->domain) ||
+         (is_ctldom && opt_dom0_shadow) ||
+         (is_hwdom && opt_pv_l1tf_hwdom) )
+    {
+        unsigned long cpu_pages = dom0_paging_pages(bd->domain, nr_pages);
+
+        if ( !iommu_use_hap_pt(bd->domain) )
+            avail -= cpu_pages;
+        else if ( cpu_pages > iommu_pages )
+            avail -= cpu_pages - iommu_pages;
+    }
+
+    return avail;
+}
+
+unsigned long __init dom_compute_nr_pages(
+    struct boot_domain *bd, struct elf_dom_parms *parms,
+    unsigned long initrd_len)
+{
+    unsigned long avail, nr_pages = bd->meminfo.mem_size.nr_pages;
+
+    if ( builder_is_initdom(bd) )
+        return dom0_compute_nr_pages(bd, parms, initrd_len);
+
+    avail = dom_avail_nr_pages(bd, node_online_map);
+
+    if ( is_pv_domain(bd->domain) && (parms->p2m_base == UNSET_ADDR) )
+    {
+        /*
+         * Legacy Linux kernels (i.e. such without a XEN_ELFNOTE_INIT_P2M
+         * note) require that there is enough virtual space beyond the initial
+         * allocation to set up their initial page tables. This space is
+         * roughly the same size as the p2m table, so make sure the initial
+         * allocation doesn't consume more than about half the space that's
+         * available between params.virt_base and the address space end.
+         */
+        unsigned long vstart, vend, end;
+        size_t sizeof_long = is_pv_32bit_domain(bd->domain) ?
+                             sizeof(int) : sizeof(long);
+
+        vstart = parms->virt_base;
+        vend = round_pgup(parms->virt_kend);
+        if ( !parms->unmapped_initrd )
+            vend += round_pgup(initrd_len);
+        end = vend + nr_pages * sizeof_long;
+
+        if ( end > vstart )
+            end += end - vstart;
+        if ( end <= vstart ||
+             (sizeof_long < sizeof(end) && end > (1UL << (8 * sizeof_long))) )
+        {
+            end = sizeof_long >= sizeof(end) ? 0 : 1UL << (8 * sizeof_long);
+            nr_pages = (end - vend) / (2 * sizeof_long);
+            printk("Dom0 memory clipped to %lu pages\n", nr_pages);
+        }
+    }
+
+    /* Clamp according to available memory (final). */
+    nr_pages = min(nr_pages, avail);
+
+    bd->domain->max_pages = min_t(unsigned long, nr_pages, UINT_MAX);
+
+    return nr_pages;
+}
 
 void __init arch_create_dom(
     const struct boot_info *bi, struct boot_domain *bd)
