@@ -413,13 +413,22 @@ static struct domain *__init create_domain(
         bd->domid = bd->domid == 0 ? dom0id : bd->domid;
         is_privileged = true;
     } else {
+        unsigned int limit;
+
         /*
          * doing under else as to not burn a domid when legacy dom0 is
          * being constructed
          */
-        bd->domid = bd->domid == 0 ? get_next_domid() : bd->domid;
-        if ( bd->domid == 0 )
-            panic("hyperlaunch: unable to allocate domain ids\n");
+        if ( bd->domid == 0 && (bd->domid = get_next_domid()) == 0 )
+                panic("hyperlaunch: unable to allocate domain ids\n");
+
+        limit = bd-> mode & HL_MODE_PARAVIRTUALIZED ?
+                    MAX_VIRT_CPUS : HVM_MAX_VCPUS;
+        if ( bd->ncpus > limit )
+            dom_cfg.max_vcpus = limit;
+        else
+            dom_cfg.max_vcpus = bd->ncpus;
+
         is_privileged = !!(bd->permissions & HL_PERMISSION_CONTROL);
     }
 
@@ -429,16 +438,24 @@ static struct domain *__init create_domain(
     d = domain_create(bd->domid, &dom_cfg, is_privileged);
     if ( IS_ERR(d) )
         return NULL;
-
-    /* construct a legacy dom0 */
-    if ( (bd->functions & HL_FUNCTION_LEGACY_DOM0) )
+    else
     {
         unsigned long cr4_pv32_mask;
 
-        hardware_domain = d;
+        if ( (bd->functions & HL_FUNCTION_LEGACY_DOM0) ||
+             (bd->permissions & HL_PERMISSION_HARDWARE) )
+            hardware_domain = d;
 
-        if ( alloc_dom0_vcpu0(d) == NULL )
-            panic("Error allocating VCPU for a Domain0\n");
+        if ( (bd->functions & HL_FUNCTION_LEGACY_DOM0) )
+        {
+            if ( alloc_dom0_vcpu0(d) == NULL )
+                panic("Error allocating VCPU for a Domain0\n");
+        }
+        else
+        {
+            if ( alloc_dom_vcpu0(d) == NULL )
+                panic("Error allocating VCPU for a Domain0\n");
+        }
 
         /*
          * Temporarily clear SMAP in CR4 to allow user-accesses in
@@ -460,8 +477,6 @@ static struct domain *__init create_domain(
             cr4_pv32_mask |= X86_CR4_SMAP;
         }
     }
-    else
-        panic("hyperlaunch: does not support non-dom0 construction");
 
     return d;
 }

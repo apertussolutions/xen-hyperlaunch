@@ -1926,6 +1926,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
             panic("Could not set up DOM0 guest OS\n");
     }
 
+    /* Free temporary buffers. */
+    discard_initial_images();
+
     heap_init_late();
 
     init_trace_bufs();

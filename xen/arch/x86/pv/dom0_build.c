@@ -387,7 +387,9 @@ int __init dom0_construct_pv(struct domain *d)
     if ( (rc = elf_init(&elf, image_start, image_len)) != 0 )
         return rc;
 
-    if ( opt_dom0_verbose )
+    if ( opt_dom0_verbose &&
+         (current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 ||
+          current_bootdomain->permissions & HL_PERMISSION_CONTROL ))
         elf_set_verbose(&elf);
 
     elf_parse_binary(&elf);
@@ -448,14 +450,18 @@ int __init dom0_construct_pv(struct domain *d)
 
     if ( parms.elf_notes[XEN_ELFNOTE_SUPPORTED_FEATURES].type != XEN_ENT_NONE )
     {
-        if ( !pv_shim && !test_bit(XENFEAT_dom0, parms.f_supported) )
+        if ( !pv_shim && !test_bit(XENFEAT_dom0, parms.f_supported) &&
+             current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 )
         {
             printk("Kernel does not support Dom0 operation\n");
             return -EINVAL;
         }
     }
 
-    nr_pages = dom0_compute_nr_pages(d, &parms, initrd_len);
+    if ( current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 )
+        nr_pages = dom0_compute_nr_pages(d, &parms, initrd_len);
+    else
+        nr_pages = dom_compute_nr_pages(d, &parms, initrd_len);
 
     if ( parms.pae == XEN_PAE_EXTCR3 )
             set_bit(VMASST_TYPE_pae_extended_cr3, &d->vm_assist);
@@ -755,7 +761,10 @@ int __init dom0_construct_pv(struct domain *d)
 
     printk("Dom%u has maximum %u VCPUs\n", d->domain_id, d->max_vcpus);
 
-    sched_setup_dom0_vcpus(d);
+    if ( current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 )
+        sched_setup_dom0_vcpus(d);
+    else
+        sched_setup_dom_vcpus(d);
 
     d->arch.paging.mode = 0;
 
@@ -794,9 +803,6 @@ int __init dom0_construct_pv(struct domain *d)
         init_hypercall_page(d, _p(parms.virt_hypercall));
     }
 
-    /* Free temporary buffers. */
-    discard_initial_images();
-
     /* Set up start info area. */
     si = (start_info_t *)vstartinfo_start;
     clear_page(si);
@@ -804,7 +810,9 @@ int __init dom0_construct_pv(struct domain *d)
 
     si->shared_info = virt_to_maddr(d->shared_info);
 
-    if ( !pv_shim )
+    if ( !pv_shim &&
+         (current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 ||
+          current_bootdomain->permissions & HL_PERMISSION_CONTROL))
         si->flags    = SIF_PRIVILEGED | SIF_INITDOMAIN;
     if ( !vinitrd_start && initrd_len )
         si->flags   |= SIF_MOD_START_PFN;
@@ -892,22 +900,25 @@ int __init dom0_construct_pv(struct domain *d)
     }
 
     memset(si->cmd_line, 0, sizeof(si->cmd_line));
-    if ( cmdline != NULL )
-        strlcpy((char *)si->cmd_line, cmdline, sizeof(si->cmd_line));
+    if ( strnlen(current_bootdomain->cmdline, MAX_GUEST_CMDLINE) > 0 )
+        strlcpy((char *)si->cmd_line, current_bootdomain->cmdline,
+                sizeof(si->cmd_line));
 
 #ifdef CONFIG_VIDEO
-    if ( !pv_shim && fill_console_start_info((void *)(si + 1)) )
-    {
-        si->console.dom0.info_off  = sizeof(struct start_info);
-        si->console.dom0.info_size = sizeof(struct dom0_vga_console_info);
-    }
+    if ( current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 ||
+         current_bootdomain->permissions & HL_PERMISSION_HARDWARE )
+        if ( !pv_shim && fill_console_start_info((void *)(si + 1)) )
+        {
+            si->console.dom0.info_off  = sizeof(struct start_info);
+            si->console.dom0.info_size = sizeof(struct dom0_vga_console_info);
+        }
 #endif
 
     /*
      * TODO: provide an empty stub for fill_console_start_info in the
      * !CONFIG_VIDEO case so the logic here can be simplified.
      */
-    if ( pv_shim )
+    if ( pv_shim && current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 )
         pv_shim_setup_dom(d, l4start, v_start, vxenstore_start, vconsole_start,
                           vphysmap_start, si);
 
@@ -951,15 +962,22 @@ int __init dom0_construct_pv(struct domain *d)
     if ( test_bit(XENFEAT_supervisor_mode_kernel, parms.f_required) )
         panic("Dom0 requires supervisor-mode execution\n");
 
-    rc = dom0_setup_permissions(d);
-    BUG_ON(rc != 0);
+    if ( current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 ||
+         current_bootdomain->permissions & HL_PERMISSION_HARDWARE )
+    {
+        rc = dom0_setup_permissions(d);
+        BUG_ON(rc != 0);
+    }
 
     if ( d->domain_id == hardware_domid )
         iommu_hwdom_init(d);
 
 #ifdef CONFIG_SHADOW_PAGING
     /* Fill the shadow pool if necessary. */
-    if ( opt_dom0_shadow || opt_pv_l1tf_hwdom )
+    if ( (opt_dom0_shadow &&
+          current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0) ||
+         (opt_pv_l1tf_hwdom &&
+          current_bootdomain->permissions & HL_PERMISSION_HARDWARE) )
     {
         bool preempted;
 
@@ -973,7 +991,8 @@ int __init dom0_construct_pv(struct domain *d)
     }
 
     /* Activate shadow mode, if requested.  Reuse the pv_l1tf tasklet. */
-    if ( opt_dom0_shadow )
+    if ( opt_dom0_shadow &&
+         current_bootdomain->functions & HL_FUNCTION_LEGACY_DOM0 )
     {
         printk("Switching dom0 to using shadow paging\n");
         tasklet_schedule(&d->arch.paging.shadow.pv_l1tf_tasklet);
