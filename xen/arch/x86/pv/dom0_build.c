@@ -382,7 +382,8 @@ int __init dom0_construct_pv(struct domain *d,
         {
             if ( unlikely(rc = switch_compat(d)) )
             {
-                printk("Dom0 failed to switch to compat: %d\n", rc);
+                printk("Domain %d failed to switch to compat: %d\n",
+                       d->domain_id, rc);
                 return rc;
             }
 
@@ -402,14 +403,15 @@ int __init dom0_construct_pv(struct domain *d,
     if ( elf_msb(&elf) )
         compatible = false;
 
-    printk(" Dom0 kernel: %s-bit%s, %s, paddr %#" PRIx64 " -> %#" PRIx64 "\n",
+    printk(" Domain %d kernel: %s-bit%s, %s, paddr %#" PRIx64 " -> %#" PRIx64 "\n",
+           d->domain_id,
            elf_64bit(&elf) ? "64" : elf_32bit(&elf) ? "32" : "??",
            parms.pae       ? ", PAE" : "",
            elf_msb(&elf)   ? "msb"   : "lsb",
            elf.pstart, elf.pend);
     if ( elf.bsd_symtab_pstart )
-        printk(" Dom0 symbol map %#" PRIx64 " -> %#" PRIx64 "\n",
-               elf.bsd_symtab_pstart, elf.bsd_symtab_pend);
+        printk(" Domain %d symbol map %#" PRIx64 " -> %#" PRIx64 "\n",
+               d->domain_id, elf.bsd_symtab_pstart, elf.bsd_symtab_pend);
 
     if ( !compatible )
     {
@@ -575,7 +577,7 @@ int __init dom0_construct_pv(struct domain *d,
     }
 
     printk("PHYSICAL MEMORY ARRANGEMENT:\n"
-           " Dom0 alloc.:   %"PRIpaddr"->%"PRIpaddr,
+           " Dom%u alloc.:   %"PRIpaddr"->%"PRIpaddr, d->domain_id,
            pfn_to_paddr(alloc_spfn), pfn_to_paddr(alloc_epfn));
     if ( domain_tot_pages(d) < nr_pages )
         printk(" (%lu pages to be allocated)",
@@ -614,7 +616,7 @@ int __init dom0_construct_pv(struct domain *d,
          ? v_end > HYPERVISOR_COMPAT_VIRT_START(d)
          : (v_start < HYPERVISOR_VIRT_END) && (v_end > HYPERVISOR_VIRT_START) )
     {
-        printk("DOM0 image overlaps with Xen private area.\n");
+        printk("DOM%u image overlaps with Xen private area.\n", d->domain_id);
         return -EINVAL;
     }
 
