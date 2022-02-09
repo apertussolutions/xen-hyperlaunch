@@ -13,6 +13,7 @@
 #include <xen/paging.h>
 #include <xen/pfn.h>
 #include <xen/sched.h>
+#include <xen/setup.h>
 #include <xen/softirq.h>
 
 #include <asm/bzimage.h>
@@ -294,10 +295,7 @@ static struct page_info * __init alloc_chunk(struct domain *d,
     return page;
 }
 
-int __init dom0_construct_pv(struct domain *d,
-                             const module_t *image,
-                             module_t *initrd,
-                             char *cmdline)
+int __init dom0_construct_pv(struct domain *d)
 {
     int i, rc, order, machine;
     bool compatible, compat;
@@ -312,10 +310,12 @@ int __init dom0_construct_pv(struct domain *d,
     struct page_info *page = NULL;
     start_info_t *si;
     struct vcpu *v = d->vcpu[0];
-    void *image_base = bootstrap_map(image);
-    unsigned long image_len = image->mod_end;
-    void *image_start = image_base + image->headroom;
-    unsigned long initrd_len = initrd ? initrd->mod_end : 0;
+    module_t *image, *initrd = NULL;
+    void *image_base;
+    unsigned long image_len;
+    void *image_start;
+    unsigned long initrd_len = 0;
+    char *cmdline;
     l4_pgentry_t *l4tab = NULL, *l4start = NULL;
     l3_pgentry_t *l3tab = NULL, *l3start = NULL;
     l2_pgentry_t *l2tab = NULL, *l2start = NULL;
@@ -351,6 +351,33 @@ int __init dom0_construct_pv(struct domain *d,
     paddr_t mpt_alloc;
 
     printk(XENLOG_INFO "*** Building a PV Dom%d ***\n", d->domain_id);
+
+    if ( current_bootdomain )
+    {
+        struct bootdomain *bd = current_bootdomain; /* shorthand ref */
+        struct bootmodule *bm;
+
+        if ( (bm = bootmodule_by_type(bd, BOOTMOD_KERNEL)) == NULL )
+        {
+            printk("Unable to locate kernel\n");
+            return -EINVAL;
+        }
+
+        image = (module_t *)_p(bm->start);
+        image_base = bootstrap_map(image);
+        image_len = image->mod_end;
+        image_start = image_base + image->headroom;
+
+        if ( (bm = bootmodule_by_type(bd, BOOTMOD_RAMDISK)) != NULL )
+        {
+            initrd = (module_t *)_p(bm->start);
+            initrd_len = initrd ? initrd->mod_end : 0;
+        }
+
+        cmdline = current_bootdomain->cmdline;
+    }
+    else
+        return -EINVAL;
 
     d->max_pages = ~0U;
 

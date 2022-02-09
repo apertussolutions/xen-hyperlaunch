@@ -13,13 +13,9 @@ unsigned long dom0_compute_nr_pages(struct domain *d,
                                     unsigned long initrd_len);
 int dom0_setup_permissions(struct domain *d);
 
-int dom0_construct_pv(struct domain *d, const module_t *image,
-                      module_t *initrd,
-                      char *cmdline);
+int dom0_construct_pv(struct domain *d);
 
-int dom0_construct_pvh(struct domain *d, const module_t *image,
-                       module_t *initrd,
-                       char *cmdline);
+int dom0_construct_pvh(struct domain *d);
 
 unsigned long dom0_paging_pages(const struct domain *d,
                                 unsigned long nr_pages);

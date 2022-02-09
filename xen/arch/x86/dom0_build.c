@@ -10,6 +10,7 @@
 #include <xen/param.h>
 #include <xen/pfn.h>
 #include <xen/sched.h>
+#include <xen/setup.h>
 #include <xen/softirq.h>
 
 #include <asm/amd.h>
@@ -20,12 +21,6 @@
 #include <asm/p2m.h>
 #include <asm/setup.h>
 #include <asm/spec_ctrl.h>
-
-struct memsize {
-    long nr_pages;
-    unsigned int percent;
-    bool minus;
-};
 
 static struct memsize __initdata dom0_size;
 static struct memsize __initdata dom0_min_size;
@@ -579,24 +574,38 @@ int __init dom0_setup_permissions(struct domain *d)
     return rc;
 }
 
-int __init construct_dom0(struct domain *d, const module_t *image,
-                          module_t *initrd, char *cmdline)
+int __init construct_domain(struct domain *d, struct bootdomain *bd)
 {
-    int rc;
+    int rc = 0;
 
     /* Sanity! */
     BUG_ON(!pv_shim && d->domain_id != 0);
     BUG_ON(d->vcpu[0] == NULL);
     BUG_ON(d->vcpu[0]->is_initialised);
 
+    current_bootdomain = bd;
+
     process_pending_softirqs();
 
-    if ( is_hvm_domain(d) )
-        rc = dom0_construct_pvh(d, image, initrd, cmdline);
-    else if ( is_pv_domain(d) )
-        rc = dom0_construct_pv(d, image, initrd, cmdline);
-    else
-        panic("Cannot construct Dom0. No guest interface available\n");
+    if ( bd->functions & HL_FUNCTION_LEGACY_DOM0 )
+    {
+        struct bootmodule *bm;
+        module_t *image, *initrd = NULL;
+
+        if ( (bm = bootmodule_by_type(bd, BOOTMOD_KERNEL)) == NULL )
+            panic("Cannot construct Dom0. No guest kernel available\n");
+        image = (module_t *)_p(bm->start);
+
+        if ( (bm = bootmodule_by_type(bd, BOOTMOD_RAMDISK)) != NULL )
+            initrd = (module_t *)_p(bm->start);
+
+        if ( is_hvm_domain(d) )
+            rc = dom0_construct_pvh(d);
+        else if ( is_pv_domain(d) )
+            rc = dom0_construct_pv(d);
+        else
+            panic("Cannot construct Dom0. No guest interface available\n");
+    }
 
     if ( rc )
         return rc;

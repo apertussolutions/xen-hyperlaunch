@@ -259,6 +259,28 @@ static int __init parse_acpi_param(const char *s)
     return 0;
 }
 
+void __init arch_dom_acpi(struct bootdomain *bd)
+{
+    if ( !bd )
+        return;
+
+    /* Append any extra parameters. */
+    if ( skip_ioapic_setup && !strstr(bd->cmdline, "noapic") )
+        safe_strcat(bd->cmdline, " noapic");
+    if ( (strlen(acpi_param) == 0) && acpi_disabled )
+    {
+        printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
+        safe_strcpy(acpi_param, "off");
+    }
+    if ( (strlen(acpi_param) != 0) && !strstr(bd->cmdline, "acpi=") )
+    {
+        safe_strcat(bd->cmdline, " acpi=");
+        safe_strcat(bd->cmdline, acpi_param);
+    }
+
+    return;
+}
+
 static const module_t *__initdata initial_images;
 static unsigned int __initdata nr_initial_images;
 
@@ -770,8 +792,10 @@ struct domain *__init create_dom0(
             .misc_flags = opt_dom0_msr_relaxed ? XEN_X86_MSR_RELAXED : 0,
         },
     };
+    struct bootdomain bd = {
+        .functions = HL_FUNCTION_LEGACY_DOM0,
+    };
     struct domain *d;
-    char *cmdline;
 
     if ( opt_dom0_pvh )
     {
@@ -792,33 +816,37 @@ struct domain *__init create_dom0(
         panic("Error creating domain 0\n");
 
     /* Grab the DOM0 command line. */
-    cmdline = image->string ? __va(image->string) : NULL;
-    if ( cmdline || kextra )
+    if ( image->string )
     {
-        static char __initdata dom0_cmdline[MAX_GUEST_CMDLINE];
+        char *cmdline = image->string ? __va(image->string) : NULL;
+        size_t sz = 0;
 
         cmdline = cmdline_cook(cmdline, loader);
-        safe_strcpy(dom0_cmdline, cmdline);
-
-        if ( kextra )
-            /* kextra always includes exactly one leading space. */
-            safe_strcat(dom0_cmdline, kextra);
-
-        /* Append any extra parameters. */
-        if ( skip_ioapic_setup && !strstr(dom0_cmdline, "noapic") )
-            safe_strcat(dom0_cmdline, " noapic");
-        if ( (strlen(acpi_param) == 0) && acpi_disabled )
+        if ( (sz = strnlen(bd.cmdline, HL_MAX_CMDLINE_LEN)) > 0 )
         {
-            printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
-            safe_strcpy(acpi_param, "off");
+            bd.cmdline[sz] = ' ';
+            bd.cmdline[sz + 1] = '\0';
+            safe_strcat(bd.cmdline, cmdline);
         }
-        if ( (strlen(acpi_param) != 0) && !strstr(dom0_cmdline, "acpi=") )
-        {
-            safe_strcat(dom0_cmdline, " acpi=");
-            safe_strcat(dom0_cmdline, acpi_param);
-        }
+        else
+            safe_strcpy(bd.cmdline, cmdline);
+    }
 
-        cmdline = dom0_cmdline;
+    if ( kextra )
+        /* kextra always includes exactly one leading space. */
+        safe_strcat(bd.cmdline, kextra);
+
+    arch_dom_acpi(&bd);
+
+    bd.modules[0].kind = BOOTMOD_KERNEL;
+    bd.modules[0].start = (paddr_t)image;
+    bd.nr_mods = 1;
+
+    if ( initrd )
+    {
+        bd.modules[1].kind = BOOTMOD_RAMDISK;
+        bd.modules[1].start = (paddr_t)initrd;
+        bd.nr_mods++;
     }
 
     /*
@@ -832,7 +860,7 @@ struct domain *__init create_dom0(
         write_cr4(read_cr4() & ~X86_CR4_SMAP);
     }
 
-    if ( construct_dom0(d, image, initrd, cmdline) != 0 )
+    if ( construct_domain(d, &bd) != 0 )
         panic("Could not construct domain 0\n");
 
     if ( cpu_has_smap )

@@ -23,6 +23,7 @@
 #include <xen/libelf.h>
 #include <xen/multiboot.h>
 #include <xen/pci.h>
+#include <xen/setup.h>
 #include <xen/softirq.h>
 
 #include <acpi/actables.h>
@@ -1208,12 +1209,29 @@ static void __hwdom_init pvh_setup_mmcfg(struct domain *d)
     }
 }
 
-int __init dom0_construct_pvh(struct domain *d, const module_t *image,
-                              module_t *initrd,
-                              char *cmdline)
+int __init dom0_construct_pvh(struct domain *d)
 {
+    module_t *image, *initrd = NULL;
     paddr_t entry, start_info;
+    char *cmdline;
     int rc;
+
+    if ( current_bootdomain )
+    {
+        struct bootdomain *bd = current_bootdomain; /* shorthand ref */
+        struct bootmodule *bm;
+
+        if ( (bm = bootmodule_by_type(bd, BOOTMOD_KERNEL)) == NULL )
+            panic("Cannot construct Dom0. No guest kernel available\n");
+        image = (module_t *)_p(bm->start);
+
+        if ( (bm = bootmodule_by_type(bd, BOOTMOD_RAMDISK)) != NULL )
+            initrd = (module_t *)_p(bm->start);
+
+        cmdline = current_bootdomain->cmdline;
+    }
+    else
+        return -EINVAL;
 
     printk(XENLOG_INFO "*** Building a PVH Dom%d ***\n", d->domain_id);
 

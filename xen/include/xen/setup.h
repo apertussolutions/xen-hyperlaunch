@@ -8,8 +8,6 @@
 #include <xen/multiboot.h>
 #endif
 
-#include <asm/setup.h>
-
 /* Reusing Dom0less definitions */
 typedef enum {
     BOOTMOD_XEN,
@@ -92,6 +90,24 @@ struct hyperlaunch_config {
     uint16_t nr_doms;
     struct bootdomain domains[HL_MAX_BOOT_DOMAINS];
 };
+
+static inline struct bootmodule *bootmodule_by_type(
+    struct bootdomain *bd, bootmodule_kind kind)
+{
+    int i;
+
+    for ( i = 0; i <= HL_MAX_DOMAIN_MODULES; i++ )
+        if ( bd->modules[i].kind == kind )
+            return &bd->modules[i];
+
+    return NULL;
+}
+
+/*
+ * reference to the configuration for the current boot domain under
+ * construction
+ */
+extern struct bootdomain *current_bootdomain;
 
 #ifdef CONFIG_HYPERLAUNCH
 extern bool hyperlaunch_enabled;

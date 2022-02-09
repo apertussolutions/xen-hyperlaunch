@@ -10,6 +10,12 @@
 #include <asm/bzimage.h> /* for bzimage_headroom */
 #include <asm/setup.h>
 
+/*
+ * reference to the configuration for the current boot domain under
+ * construction
+ */
+struct bootdomain __initdata *current_bootdomain;
+
 #ifdef CONFIG_HYPERLAUNCH
 
 bool __initdata hyperlaunch_enabled;

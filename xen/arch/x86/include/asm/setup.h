@@ -2,6 +2,7 @@
 #define __X86_SETUP_H_
 
 #include <xen/multiboot.h>
+#include <xen/setup.h>
 #include <asm/numa.h>
 
 extern const char __2M_text_start[], __2M_text_end[];
@@ -34,15 +35,14 @@ static inline void vesa_init(void) {};
 static inline void vesa_mtrr_init(void) {};
 #endif
 
+void arch_dom_acpi(struct bootdomain *bd);
+
 struct domain *__init create_dom0(
     const module_t *image, module_t *initrd, const char *kextra,
     const char *loader);
 
-int construct_dom0(
-    struct domain *d,
-    const module_t *kernel,
-    module_t *initrd,
-    char *cmdline);
+int construct_domain(struct domain *d, struct bootdomain *bd);
+
 void setup_io_bitmap(struct domain *d);
 
 unsigned long initial_images_nrpages(nodeid_t node);
