@@ -2,6 +2,7 @@
 #define _ASM_X8664_NUMA_H 1
 
 #include <xen/cpumask.h>
+#include <asm/page.h>
 
 #define NODES_SHIFT 6
 
