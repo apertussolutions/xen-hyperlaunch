@@ -400,8 +400,11 @@ unsigned long __init dom0_compute_nr_pages(
 
     avail = avail_nr_pages(d, dom0_nodes);
 
-    nr_pages = get_memsize(&dom0_size, avail) ?: default_nr_pages(avail);
-    min_pages = get_memsize(&dom0_min_size, avail);
+    if ( current_bootdomain && current_bootdomain->mem_size.nr_pages > 0 )
+        nr_pages = current_bootdomain->mem_size.nr_pages;
+    else
+        nr_pages = get_memsize(&dom0_size, avail) ?: default_nr_pages(avail);
+    min_pages = get_memsize(&dom0_min_size, nr_pages);
     max_pages = get_memsize(&dom0_max_size, avail);
 
     if ( is_pv_domain(d) &&
