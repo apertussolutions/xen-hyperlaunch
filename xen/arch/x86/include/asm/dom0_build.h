@@ -17,7 +17,7 @@ unsigned long __init dom_compute_nr_pages(
 
 int dom0_setup_permissions(struct domain *d);
 
-int dom0_construct_pv(struct domain *d);
+int dom_construct_pv(struct domain *d);
 
 int dom0_construct_pvh(struct domain *d);
 

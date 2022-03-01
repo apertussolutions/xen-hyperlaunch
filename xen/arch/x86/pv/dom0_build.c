@@ -295,7 +295,7 @@ static struct page_info * __init alloc_chunk(struct domain *d,
     return page;
 }
 
-int __init dom0_construct_pv(struct domain *d)
+int __init dom_construct_pv(struct domain *d)
 {
     int i, rc, order, machine;
     bool compatible, compat;

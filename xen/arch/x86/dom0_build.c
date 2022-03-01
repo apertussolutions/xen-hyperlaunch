@@ -633,6 +633,7 @@ int __init dom0_setup_permissions(struct domain *d)
 
 int __init construct_domain(struct domain *d, struct bootdomain *bd)
 {
+    struct bootmodule *bm;
     int rc = 0;
 
     /* Sanity! */
@@ -644,29 +645,25 @@ int __init construct_domain(struct domain *d, struct bootdomain *bd)
 
     process_pending_softirqs();
 
-    if ( bd->functions & HL_FUNCTION_LEGACY_DOM0 )
-    {
-        struct bootmodule *bm;
-        module_t *image, *initrd = NULL;
+    if ( (bm = bootmodule_by_type(bd, BOOTMOD_KERNEL)) == NULL )
+        panic("Cannot construct Dom%d. No guest kernel available\n",
+              d->domain_id);
 
-        if ( (bm = bootmodule_by_type(bd, BOOTMOD_KERNEL)) == NULL )
-            panic("Cannot construct Dom0. No guest kernel available\n");
-        image = (module_t *)_p(bm->start);
-
-        if ( (bm = bootmodule_by_type(bd, BOOTMOD_RAMDISK)) != NULL )
-            initrd = (module_t *)_p(bm->start);
-
-        if ( is_hvm_domain(d) )
+    if ( is_hvm_domain(d) )
+        if ( bd->functions & HL_FUNCTION_LEGACY_DOM0 )
             rc = dom0_construct_pvh(d);
-        else if ( is_pv_domain(d) )
-            rc = dom0_construct_pv(d);
         else
-            panic("Cannot construct Dom0. No guest interface available\n");
-    }
+            rc = -EINVAL;
+    else if ( is_pv_domain(d) )
+        rc = dom_construct_pv(d);
+    else
+        panic("Cannot construct Dom%d. No guest interface available\n",
+              d->domain_id);
 
     if ( rc )
         return rc;
 
+    printk("DOM CONSTRUCT: vcpu0 init: %d\n", d->vcpu[0]->is_initialised);
     /* Sanity! */
     BUG_ON(!d->vcpu[0]->is_initialised);
 
