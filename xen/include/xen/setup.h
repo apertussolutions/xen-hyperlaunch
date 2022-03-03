@@ -139,7 +139,7 @@ static inline bool __init hyperlaunch_mb_init(module_t *mods)
     return false;
 }
 
-void __init hyperlaunch_mb_headroom(void)
+static inline void __init hyperlaunch_mb_headroom(void)
 {
     return;
 }
