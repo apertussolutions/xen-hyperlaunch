@@ -22,4 +22,15 @@ config MULTIDOM_BUILDER
 
 	  If unsure, say N.
 
+config BUILDER_HYPFS
+	bool "Domain builder hypfs support (UNSUPPORTED)" if UNSUPPORTED
+	depends on HYPFS
+	---help---
+	  Exposes the domain builder construction information
+	  through hypfs.
+
+	  This feature is currently experimental.
+
+	  If unsure, say N.
+
 endmenu

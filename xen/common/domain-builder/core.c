@@ -134,6 +134,9 @@ uint32_t __init builder_create_domains(struct boot_info *info)
         /* Free temporary buffers. */
         discard_initial_images();
 
+    if ( IS_ENABLED(CONFIG_BUILDER_HYPFS) )
+        builder_hypfs(info);
+
     return build_count;
 }
 

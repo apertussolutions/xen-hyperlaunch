@@ -72,4 +72,17 @@ int alloc_system_evtchn(
     const struct boot_info *info, struct boot_domain *bd);
 void arch_create_dom(const struct boot_info *bi, struct boot_domain *bd);
 
+#ifdef CONFIG_HYPFS
+
+void builder_hypfs(struct boot_info *info);
+
+#else
+
+static inline void builder_hypfs(struct boot_info *info)
+{
+    return;
+}
+
+#endif
+
 #endif /* XEN_DOMAIN_BUILDER_H */
