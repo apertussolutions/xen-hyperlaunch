@@ -17,3 +17,15 @@ config NR_CPUS
 	  For CPU cores which support Simultaneous Multi-Threading or similar
 	  technologies, this the number of logical threads which Xen will
 	  support.
+
+config NR_BOOTMODS
+	int "Maximum number of boot modules that a loader can pass"
+	range 1 32768
+	default "8" if X86
+	default "32" if ARM
+	help
+	  Controls the build-time size of various arrays allocated for
+	  parsing the boot modules passed by a loader when starting Xen.
+
+	  This is of particular interest when using Xen's hypervisor domain
+	  capabilities such as dom0less.

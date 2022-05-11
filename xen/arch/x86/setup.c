@@ -1020,9 +1020,9 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         panic("dom0 kernel not specified. Check bootloader configuration\n");
 
     /* Check that we don't have a silly number of modules. */
-    if ( mbi->mods_count > sizeof(module_map) * 8 )
+    if ( mbi->mods_count > CONFIG_NR_BOOTMODS )
     {
-        mbi->mods_count = sizeof(module_map) * 8;
+        mbi->mods_count = CONFIG_NR_BOOTMODS;
         printk("Excessive multiboot modules - using the first %u only\n",
                mbi->mods_count);
     }

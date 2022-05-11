@@ -18,7 +18,7 @@ static multiboot_info_t __initdata mbi = {
  * The array size needs to be one larger than the number of modules we
  * support - see __start_xen().
  */
-static module_t __initdata mb_modules[5];
+static module_t __initdata mb_modules[CONFIG_NR_BOOTMODS + 1];
 
 static void __init edd_put_string(u8 *dst, size_t n, const char *src)
 {

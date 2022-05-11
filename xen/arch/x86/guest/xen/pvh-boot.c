@@ -32,7 +32,7 @@ bool __initdata pvh_boot;
 uint32_t __initdata pvh_start_info_pa;
 
 static multiboot_info_t __initdata pvh_mbi;
-static module_t __initdata pvh_mbi_mods[8];
+static module_t __initdata pvh_mbi_mods[CONFIG_NR_BOOTMOD + 1];
 static const char *__initdata pvh_loader = "PVH Directboot";
 
 static void __init convert_pvh_info(multiboot_info_t **mbi,

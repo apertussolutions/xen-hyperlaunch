@@ -10,7 +10,8 @@
 
 #define NR_MEM_BANKS 256
 
-#define MAX_MODULES 32 /* Current maximum useful modules */
+/* Current maximum useful modules */
+#define MAX_MODULES CONFIG_NR_BOOTMODS
 
 typedef enum {
     BOOTMOD_XEN,
@@ -38,7 +39,7 @@ struct meminfo {
  * The domU flag is set for kernels and ramdisks of "xen,domain" nodes.
  * The purpose of the domU flag is to avoid getting confused in
  * kernel_probe, where we try to guess which is the dom0 kernel and
- * initrd to be compatible with all versions of the multiboot spec. 
+ * initrd to be compatible with all versions of the multiboot spec.
  */
 #define BOOTMOD_MAX_CMDLINE 1024
 struct bootmodule {
