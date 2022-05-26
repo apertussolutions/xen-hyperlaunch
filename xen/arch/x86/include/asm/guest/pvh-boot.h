@@ -19,13 +19,13 @@
 #ifndef __X86_PVH_BOOT_H__
 #define __X86_PVH_BOOT_H__
 
-#include <xen/multiboot.h>
+#include <xen/bootinfo.h>
 
 #ifdef CONFIG_PVH_GUEST
 
 extern bool pvh_boot;
 
-void pvh_init(multiboot_info_t **mbi, module_t **mod);
+void __init pvh_init(struct boot_info **bi);
 void pvh_print_info(void);
 
 #else
@@ -34,7 +34,7 @@ void pvh_print_info(void);
 
 #define pvh_boot 0
 
-static inline void pvh_init(multiboot_info_t **mbi, module_t **mod)
+static inline void __init pvh_init(struct boot_info **bi)
 {
     ASSERT_UNREACHABLE();
 }

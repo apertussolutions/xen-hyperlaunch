@@ -27,6 +27,7 @@ asm (
     );
 
 #include "defs.h"
+#include "boot_info32.h"
 #include "../../../include/xen/multiboot.h"
 #include "../../../include/xen/multiboot2.h"
 
@@ -138,65 +139,116 @@ static struct hvm_start_info *pvh_info_reloc(u32 in)
     return out;
 }
 
-static multiboot_info_t *mbi_reloc(u32 mbi_in)
+static struct boot_info *mbi_reloc(u32 mbi_in)
 {
+    const multiboot_info_t *mbi = _p(mbi_in);
+    struct boot_info *binfo;
+    struct arch_boot_info *arch_binfo;
     int i;
-    multiboot_info_t *mbi_out;
+    uint32_t ptr;
 
-    mbi_out = _p(copy_mem(mbi_in, sizeof(*mbi_out)));
+    ptr = alloc_mem(sizeof(*binfo));
+    zero_mem(ptr, sizeof(*binfo));
+    binfo = _p(ptr);
 
-    if ( mbi_out->flags & MBI_CMDLINE )
-        mbi_out->cmdline = copy_string(mbi_out->cmdline);
+    ptr = alloc_mem(sizeof(*arch_binfo));
+    zero_mem(ptr, sizeof(*arch_binfo));
+    binfo->arch = ptr;
+    arch_binfo = _p(ptr);
 
-    if ( mbi_out->flags & MBI_MODULES )
+    if ( mbi->flags & MBI_CMDLINE )
+    {
+        ptr = copy_string(mbi->cmdline);
+        binfo->cmdline = ptr;
+        arch_binfo->flags |= BOOTINFO_FLAG_X86_CMDLINE;
+    }
+
+    if ( mbi->flags & MBI_MODULES )
     {
         module_t *mods;
+        struct boot_module *bi_mods;
+        struct arch_bootmodule *arch_bi_mods;
 
-        mbi_out->mods_addr = copy_mem(mbi_out->mods_addr,
-                                      mbi_out->mods_count * sizeof(module_t));
+        /*
+         * We have to allocate one more module slot here. At some point
+         * __start_xen() may put Xen image placement into it.
+         */
+        ptr = alloc_mem((mbi->mods_count + 1) * sizeof(*bi_mods));
+        binfo->nr_mods = mbi->mods_count;
+        binfo->mods = ptr;
+        bi_mods = _p(ptr);
 
-        mods = _p(mbi_out->mods_addr);
+        ptr = alloc_mem((mbi->mods_count + 1) * sizeof(*arch_bi_mods));
+        arch_bi_mods = _p(ptr);
 
-        for ( i = 0; i < mbi_out->mods_count; i++ )
+        /* map the +1 allocated for Xen image */
+        bi_mods[mbi->mods_count].arch = _addr(&arch_bi_mods[mbi->mods_count]);
+
+        arch_binfo->flags |= BOOTINFO_FLAG_X86_MODULES;
+
+        mods = _p(mbi->mods_addr);
+
+        for ( i = 0; i < mbi->mods_count; i++ )
         {
+            bi_mods[i].start = mods[i].mod_start;
+            bi_mods[i].size = mods[i].mod_end - mods[i].mod_start;
+
             if ( mods[i].string )
-                mods[i].string = copy_string(mods[i].string);
+            {
+                int j;
+                char *c = _p(mods[i].string);
+
+                for ( j = 0; *c != '\0'; j++, c++ )
+                    bi_mods[i].string.bytes[j] = *c;
+
+                bi_mods[i].string.len = j + 1;
+            }
+
+            bi_mods[i].arch = _addr(&arch_bi_mods[i]);
         }
     }
 
-    if ( mbi_out->flags & MBI_MEMMAP )
-        mbi_out->mmap_addr = copy_mem(mbi_out->mmap_addr, mbi_out->mmap_length);
+    if ( mbi->flags & MBI_MEMMAP )
+    {
+        arch_binfo->mmap_addr = copy_mem(mbi->mmap_addr, mbi->mmap_length);
+        arch_binfo->mmap_length = mbi->mmap_length;
+        arch_binfo->flags |= BOOTINFO_FLAG_X86_MEMMAP;
+    }
 
-    if ( mbi_out->flags & MBI_LOADERNAME )
-        mbi_out->boot_loader_name = copy_string(mbi_out->boot_loader_name);
+    if ( mbi->flags & MBI_LOADERNAME )
+    {
+        ptr = copy_string(mbi->boot_loader_name);
+        arch_binfo->boot_loader_name = ptr;
+        arch_binfo->flags |= BOOTINFO_FLAG_X86_LOADERNAME;
+    }
 
-    /* Mask features we don't understand or don't relocate. */
-    mbi_out->flags &= (MBI_MEMLIMITS |
-                       MBI_CMDLINE |
-                       MBI_MODULES |
-                       MBI_MEMMAP |
-                       MBI_LOADERNAME);
-
-    return mbi_out;
+    return binfo;
 }
 
-static multiboot_info_t *mbi2_reloc(uint32_t mbi_in, uint32_t video_out)
+static struct boot_info *mbi2_reloc(uint32_t mbi_in, uint32_t video_out)
 {
     const multiboot2_fixed_t *mbi_fix = _p(mbi_in);
     const multiboot2_memory_map_t *mmap_src;
     const multiboot2_tag_t *tag;
-    module_t *mbi_out_mods = NULL;
     memory_map_t *mmap_dst;
-    multiboot_info_t *mbi_out;
+    struct boot_info *binfo;
+    struct arch_boot_info *arch_binfo;
+    struct boot_module *bi_mods;
+    struct arch_bootmodule *arch_bi_mods;
 #ifdef CONFIG_VIDEO
     struct boot_video_info *video = NULL;
 #endif
     u32 ptr;
     unsigned int i, mod_idx = 0;
 
-    ptr = alloc_mem(sizeof(*mbi_out));
-    mbi_out = _p(ptr);
-    zero_mem(ptr, sizeof(*mbi_out));
+    ptr = alloc_mem(sizeof(*binfo));
+    zero_mem(ptr, sizeof(*binfo));
+    binfo = _p(ptr);
+
+    ptr = alloc_mem(sizeof(*arch_binfo));
+    zero_mem(ptr, sizeof(*arch_binfo));
+    binfo->arch = ptr;
+    arch_binfo = _p(ptr);
 
     /* Skip Multiboot2 information fixed part. */
     ptr = ALIGN_UP(mbi_in + sizeof(*mbi_fix), MULTIBOOT2_TAG_ALIGN);
@@ -206,21 +258,28 @@ static multiboot_info_t *mbi2_reloc(uint32_t mbi_in, uint32_t video_out)
           tag = _p(ALIGN_UP((u32)tag + tag->size, MULTIBOOT2_TAG_ALIGN)) )
     {
         if ( tag->type == MULTIBOOT2_TAG_TYPE_MODULE )
-            ++mbi_out->mods_count;
+            ++binfo->nr_mods;
         else if ( tag->type == MULTIBOOT2_TAG_TYPE_END )
             break;
     }
 
-    if ( mbi_out->mods_count )
+    if ( binfo->nr_mods )
     {
-        mbi_out->flags |= MBI_MODULES;
         /*
          * We have to allocate one more module slot here. At some point
          * __start_xen() may put Xen image placement into it.
          */
-        mbi_out->mods_addr = alloc_mem((mbi_out->mods_count + 1) *
-                                       sizeof(*mbi_out_mods));
-        mbi_out_mods = _p(mbi_out->mods_addr);
+        ptr = alloc_mem((binfo->nr_mods + 1) * sizeof(*bi_mods));
+        binfo->mods = ptr;
+        bi_mods = _p(ptr);
+
+        ptr = alloc_mem((binfo->nr_mods + 1) * sizeof(*arch_bi_mods));
+        arch_bi_mods = _p(ptr);
+
+        /* map the +1 allocated for Xen image */
+        bi_mods[binfo->nr_mods].arch = _addr(&arch_bi_mods[binfo->nr_mods]);
+
+        arch_binfo->flags |= BOOTINFO_FLAG_X86_MODULES;
     }
 
     /* Skip Multiboot2 information fixed part. */
@@ -232,39 +291,38 @@ static multiboot_info_t *mbi2_reloc(uint32_t mbi_in, uint32_t video_out)
         switch ( tag->type )
         {
         case MULTIBOOT2_TAG_TYPE_BOOT_LOADER_NAME:
-            mbi_out->flags |= MBI_LOADERNAME;
             ptr = get_mb2_string(tag, string, string);
-            mbi_out->boot_loader_name = copy_string(ptr);
+            arch_binfo->boot_loader_name = copy_string(ptr);
+            arch_binfo->flags |= BOOTINFO_FLAG_X86_LOADERNAME;
             break;
 
         case MULTIBOOT2_TAG_TYPE_CMDLINE:
-            mbi_out->flags |= MBI_CMDLINE;
             ptr = get_mb2_string(tag, string, string);
-            mbi_out->cmdline = copy_string(ptr);
+            binfo->cmdline = copy_string(ptr);
+            arch_binfo->flags |= BOOTINFO_FLAG_X86_CMDLINE;
             break;
 
         case MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO:
-            mbi_out->flags |= MBI_MEMLIMITS;
-            mbi_out->mem_lower = get_mb2_data(tag, basic_meminfo, mem_lower);
-            mbi_out->mem_upper = get_mb2_data(tag, basic_meminfo, mem_upper);
+            arch_binfo->mem_lower = get_mb2_data(tag, basic_meminfo, mem_lower);
+            arch_binfo->mem_upper = get_mb2_data(tag, basic_meminfo, mem_upper);
             break;
 
         case MULTIBOOT2_TAG_TYPE_MMAP:
             if ( get_mb2_data(tag, mmap, entry_size) < sizeof(*mmap_src) )
                 break;
 
-            mbi_out->flags |= MBI_MEMMAP;
-            mbi_out->mmap_length = get_mb2_data(tag, mmap, size);
-            mbi_out->mmap_length -= sizeof(multiboot2_tag_mmap_t);
-            mbi_out->mmap_length /= get_mb2_data(tag, mmap, entry_size);
-            mbi_out->mmap_length *= sizeof(*mmap_dst);
+            arch_binfo->mmap_length = get_mb2_data(tag, mmap, size);
+            arch_binfo->mmap_length -= sizeof(multiboot2_tag_mmap_t);
+            arch_binfo->mmap_length /= get_mb2_data(tag, mmap, entry_size);
+            arch_binfo->mmap_length *= sizeof(*mmap_dst);
 
-            mbi_out->mmap_addr = alloc_mem(mbi_out->mmap_length);
+            arch_binfo->mmap_addr = alloc_mem(arch_binfo->mmap_length);
+            arch_binfo->flags |= BOOTINFO_FLAG_X86_MEMMAP;
 
             mmap_src = get_mb2_data(tag, mmap, entries);
-            mmap_dst = _p(mbi_out->mmap_addr);
+            mmap_dst = _p(arch_binfo->mmap_addr);
 
-            for ( i = 0; i < mbi_out->mmap_length / sizeof(*mmap_dst); i++ )
+            for ( i = 0; i < arch_binfo->mmap_length / sizeof(*mmap_dst); i++ )
             {
                 /* Init size member properly. */
                 mmap_dst[i].size = sizeof(*mmap_dst);
@@ -280,14 +338,27 @@ static multiboot_info_t *mbi2_reloc(uint32_t mbi_in, uint32_t video_out)
             break;
 
         case MULTIBOOT2_TAG_TYPE_MODULE:
-            if ( mod_idx >= mbi_out->mods_count )
+            if ( mod_idx >= binfo->nr_mods )
                 break;
 
-            mbi_out_mods[mod_idx].mod_start = get_mb2_data(tag, module, mod_start);
-            mbi_out_mods[mod_idx].mod_end = get_mb2_data(tag, module, mod_end);
+            bi_mods[mod_idx].start = get_mb2_data(tag, module, mod_start);
+            bi_mods[mod_idx].size = get_mb2_data(tag, module, mod_end)
+                                            - bi_mods[mod_idx].start;
+
             ptr = get_mb2_string(tag, module, cmdline);
-            mbi_out_mods[mod_idx].string = copy_string(ptr);
-            mbi_out_mods[mod_idx].reserved = 0;
+            if ( ptr )
+            {
+                int i;
+                char *c = _p(ptr);
+
+                for ( i = 0; *c != '\0'; i++, c++ )
+                    bi_mods[mod_idx].string.bytes[i] = *c;
+
+                bi_mods[mod_idx].string.len = i + 1;
+            }
+
+            bi_mods[mod_idx].arch = _addr(&arch_bi_mods[mod_idx]);
+
             ++mod_idx;
             break;
 
@@ -344,11 +415,11 @@ static multiboot_info_t *mbi2_reloc(uint32_t mbi_in, uint32_t video_out)
         video->orig_video_isVGA = 0x23;
 #endif
 
-    return mbi_out;
+    return binfo;
 }
 
-void *__stdcall reloc(uint32_t magic, uint32_t in, uint32_t trampoline,
-                      uint32_t video_info)
+void *__stdcall reloc(
+    uint32_t magic, uint32_t in, uint32_t trampoline, uint32_t video_info)
 {
     alloc = trampoline;
 

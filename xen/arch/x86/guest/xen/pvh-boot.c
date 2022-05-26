@@ -18,6 +18,7 @@
  *
  * Copyright (c) 2017 Citrix Systems Ltd.
  */
+#include <xen/bootinfo.h>
 #include <xen/init.h>
 #include <xen/lib.h>
 #include <xen/mm.h>
@@ -31,12 +32,28 @@
 bool __initdata pvh_boot;
 uint32_t __initdata pvh_start_info_pa;
 
-static multiboot_info_t __initdata pvh_mbi;
-static module_t __initdata pvh_mbi_mods[CONFIG_NR_BOOTMOD + 1];
-static const char *__initdata pvh_loader = "PVH Directboot";
+static struct boot_info __initdata pvh_bi;
+static struct arch_boot_info __initdata arch_pvh_bi;
+static struct boot_module __initdata pvh_mods[CONFIG_NR_BOOTMODS + 1];
+static struct arch_bootmodule __initdata arch_pvh_mods[CONFIG_NR_BOOTMODS + 1];
+static char __initdata *pvh_loader = "PVH Directboot";
 
-static void __init convert_pvh_info(multiboot_info_t **mbi,
-                                    module_t **mod)
+static struct boot_info __init *init_pvh_info(void)
+{
+    int i;
+
+    pvh_bi.arch = &arch_pvh_bi;
+    pvh_bi.mods = pvh_mods;
+
+    for ( i=0; i <= CONFIG_NR_BOOTMODS; i++ )
+        pvh_bi.mods[i].arch = &arch_pvh_mods[i];
+
+    pvh_bi.arch->boot_loader_name = pvh_loader;
+
+    return &pvh_bi;
+}
+
+static void __init convert_pvh_info(struct boot_info *bi)
 {
     const struct hvm_start_info *pvh_info = __va(pvh_start_info_pa);
     const struct hvm_modlist_entry *entry;
@@ -50,23 +67,22 @@ static void __init convert_pvh_info(multiboot_info_t **mbi,
      * required. The extra element is used to aid relocation. See
      * arch/x86/setup.c:__start_xen().
      */
-    if ( ARRAY_SIZE(pvh_mbi_mods) <= pvh_info->nr_modules )
+    if ( ARRAY_SIZE(pvh_mods) <= pvh_info->nr_modules )
         panic("The module array is too small, size %zu, requested %u\n",
-              ARRAY_SIZE(pvh_mbi_mods), pvh_info->nr_modules);
+              ARRAY_SIZE(pvh_mods), pvh_info->nr_modules);
 
     /*
      * Turn hvm_start_info into mbi. Luckily all modules are placed under 4GB
      * boundary on x86.
      */
-    pvh_mbi.flags = MBI_CMDLINE | MBI_MODULES | MBI_LOADERNAME;
+    bi->arch->flags = BOOTINFO_FLAG_X86_CMDLINE | BOOTINFO_FLAG_X86_MODULES
+                      | BOOTINFO_FLAG_X86_LOADERNAME;
 
     BUG_ON(pvh_info->cmdline_paddr >> 32);
-    pvh_mbi.cmdline = pvh_info->cmdline_paddr;
-    pvh_mbi.boot_loader_name = __pa(pvh_loader);
+    bi->cmdline = _p(__va(pvh_info->cmdline_paddr));
 
-    BUG_ON(pvh_info->nr_modules >= ARRAY_SIZE(pvh_mbi_mods));
-    pvh_mbi.mods_count = pvh_info->nr_modules;
-    pvh_mbi.mods_addr = __pa(pvh_mbi_mods);
+    BUG_ON(pvh_info->nr_modules >= ARRAY_SIZE(pvh_mods));
+    bi->nr_mods = pvh_info->nr_modules;
 
     entry = __va(pvh_info->modlist_paddr);
     for ( i = 0; i < pvh_info->nr_modules; i++ )
@@ -74,15 +90,18 @@ static void __init convert_pvh_info(multiboot_info_t **mbi,
         BUG_ON(entry[i].paddr >> 32);
         BUG_ON(entry[i].cmdline_paddr >> 32);
 
-        pvh_mbi_mods[i].mod_start = entry[i].paddr;
-        pvh_mbi_mods[i].mod_end   = entry[i].paddr + entry[i].size;
-        pvh_mbi_mods[i].string    = entry[i].cmdline_paddr;
+        bi->mods[i].start = entry[i].paddr;
+        bi->mods[i].size  = entry[i].size;
+        if ( entry[i].cmdline_paddr)
+        {
+            char *c = _p(__va(entry[i].cmdline_paddr));
+
+            safe_strcpy(bi->mods[i].string.bytes, c);
+            bi->mods[i].string.kind = BOOTSTR_CMDLINE;
+        }
     }
 
     rsdp_hint = pvh_info->rsdp_paddr;
-
-    *mbi = &pvh_mbi;
-    *mod = pvh_mbi_mods;
 }
 
 static void __init get_memory_map(void)
@@ -99,12 +118,15 @@ static void __init get_memory_map(void)
     sanitize_e820_map(e820_raw.map, &e820_raw.nr_map);
 }
 
-void __init pvh_init(multiboot_info_t **mbi, module_t **mod)
+void __init pvh_init(struct boot_info **bi)
 {
-    convert_pvh_info(mbi, mod);
+    *bi = init_pvh_info();
+    convert_pvh_info(*bi);
 
     hypervisor_probe();
     ASSERT(xen_guest);
+
+    (*bi)->arch->xen_guest = xen_guest;
 
     get_memory_map();
 }

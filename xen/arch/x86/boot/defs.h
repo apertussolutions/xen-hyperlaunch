@@ -22,11 +22,11 @@
 
 #include "../../../include/xen/stdbool.h"
 
-#define __maybe_unused	__attribute__((__unused__))
-#define __packed	__attribute__((__packed__))
-#define __stdcall	__attribute__((__stdcall__))
+#define __maybe_unused  __attribute__((__unused__))
+#define __packed        __attribute__((__packed__))
+#define __stdcall       __attribute__((__stdcall__))
 
-#define NULL		((void *)0)
+#define NULL            ((void *)0)
 
 #define ALIGN_UP(arg, align) \
                 (((arg) + (align) - 1) & ~((typeof(arg))(align) - 1))
@@ -43,9 +43,10 @@
         (void) (&_x == &_y);            \
         _x > _y ? _x : _y; })
 
-#define _p(val)		((void *)(unsigned long)(val))
+#define _p(val)     ((void *)(unsigned long)(val))
+#define _addr(val)  ((unsigned long)(void *)(val))
 
-#define tolower(c)	((c) | 0x20)
+#define tolower(c)  ((c) | 0x20)
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -57,7 +58,7 @@ typedef u16 uint16_t;
 typedef u32 uint32_t;
 typedef u64 uint64_t;
 
-#define U16_MAX		((u16)(~0U))
-#define UINT_MAX	(~0U)
+#define U16_MAX     ((u16)(~0U))
+#define UINT_MAX    (~0U)
 
 #endif /* __BOOT_DEFS_H__ */

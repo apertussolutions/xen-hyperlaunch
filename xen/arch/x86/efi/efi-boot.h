@@ -11,14 +11,17 @@
 #include <asm/setup.h>
 
 static struct file __initdata ucode;
-static multiboot_info_t __initdata mbi = {
-    .flags = MBI_MODULES | MBI_LOADERNAME
-};
+
+static struct boot_info __initdata efi_bi;
+static struct arch_boot_info __initdata efi_bi_arch;
 /*
  * The array size needs to be one larger than the number of modules we
  * support - see __start_xen().
  */
-static module_t __initdata mb_modules[CONFIG_NR_BOOTMODS + 1];
+static struct boot_module __initdata efi_mods[CONFIG_NR_BOOTMODS + 1];
+static struct arch_bootmodule __initdata efi_arch_mods[CONFIG_NR_BOOTMODS + 1];
+
+static const char *__initdata efi_loader = "PVH Directboot";
 
 static void __init edd_put_string(u8 *dst, size_t n, const char *src)
 {
@@ -269,20 +272,37 @@ static void __init noreturn efi_arch_post_exit_boot(void)
                    : [cr3] "r" (idle_pg_table),
                      [cs] "i" (__HYPERVISOR_CS),
                      [ds] "r" (__HYPERVISOR_DS),
-                     "D" (&mbi)
+                     "D" (&efi_bi)
                    : "memory" );
     unreachable();
 }
 
-static void __init efi_arch_cfg_file_early(const EFI_LOADED_IMAGE *image,
-                                           EFI_FILE_HANDLE dir_handle,
-                                           const char *section)
+static struct boot_info __init *efi_arch_bootinfo_init(void)
+{
+    int i;
+
+    efi_bi.arch = &efi_bi_arch;
+    efi_bi.mods = efi_mods;
+
+    for ( i=0; i <= CONFIG_NR_BOOTMODS; i++ )
+        efi_bi.mods[i].arch = &efi_arch_mods[i];
+
+    efi_bi_arch.boot_loader_name = _p(efi_loader);
+
+    efi_bi_arch.flags = BOOTINFO_FLAG_X86_MODULES |
+                        BOOTINFO_FLAG_X86_LOADERNAME;
+    return &efi_bi;
+}
+
+static void __init efi_arch_cfg_file_early(
+    const EFI_LOADED_IMAGE *image, EFI_FILE_HANDLE dir_handle,
+    const char *section)
 {
 }
 
-static void __init efi_arch_cfg_file_late(const EFI_LOADED_IMAGE *image,
-                                          EFI_FILE_HANDLE dir_handle,
-                                          const char *section)
+static void __init efi_arch_cfg_file_late(
+    const EFI_LOADED_IMAGE *image, EFI_FILE_HANDLE dir_handle,
+    const char *section)
 {
     union string name;
 
@@ -294,16 +314,15 @@ static void __init efi_arch_cfg_file_late(const EFI_LOADED_IMAGE *image,
         name.s = get_value(&cfg, "global", "ucode");
     if ( name.s )
     {
-        microcode_set_module(mbi.mods_count);
+        microcode_set_module(efi_bi.nr_mods);
         split_string(name.s);
         read_file(dir_handle, s2w(&name), &ucode, NULL);
         efi_bs->FreePool(name.w);
     }
 }
 
-static void __init efi_arch_handle_cmdline(CHAR16 *image_name,
-                                           CHAR16 *cmdline_options,
-                                           const char *cfgfile_options)
+static void __init efi_arch_handle_cmdline(
+    CHAR16 *image_name, CHAR16 *cmdline_options, const char *cfgfile_options)
 {
     union string name;
 
@@ -311,10 +330,10 @@ static void __init efi_arch_handle_cmdline(CHAR16 *image_name,
     {
         name.w = cmdline_options;
         w2s(&name);
-        place_string(&mbi.cmdline, name.s);
+        place_string((uint32_t *)efi_bi.cmdline, name.s);
     }
     if ( cfgfile_options )
-        place_string(&mbi.cmdline, cfgfile_options);
+        place_string((uint32_t *)efi_bi.cmdline, cfgfile_options);
     /* Insert image name last, as it gets prefixed to the other options. */
     if ( image_name )
     {
@@ -323,16 +342,10 @@ static void __init efi_arch_handle_cmdline(CHAR16 *image_name,
     }
     else
         name.s = "xen";
-    place_string(&mbi.cmdline, name.s);
+    place_string((uint32_t *)efi_bi.cmdline, name.s);
 
-    if ( mbi.cmdline )
-        mbi.flags |= MBI_CMDLINE;
-    /*
-     * These must not be initialized statically, since the value must
-     * not get relocated when processing base relocations later.
-     */
-    mbi.boot_loader_name = (long)"EFI";
-    mbi.mods_addr = (long)mb_modules;
+    if ( efi_bi.cmdline )
+        efi_bi_arch.flags |= BOOTINFO_FLAG_X86_CMDLINE;
 }
 
 static void __init efi_arch_edd(void)
@@ -695,9 +708,8 @@ static void __init efi_arch_memory_setup(void)
 #undef l2_4G_offset
 }
 
-static void __init efi_arch_handle_module(const struct file *file,
-                                          const CHAR16 *name,
-                                          const char *options)
+static void __init efi_arch_handle_module(
+    const struct file *file, const CHAR16 *name, const char *options)
 {
     union string local_name;
     void *ptr;
@@ -715,17 +727,25 @@ static void __init efi_arch_handle_module(const struct file *file,
     w2s(&local_name);
 
     /*
-     * If options are provided, put them in
-     * mb_modules[mbi.mods_count].string after the filename, with a space
-     * separating them.  place_string() prepends strings and adds separating
-     * spaces, so the call order is reversed.
+     * Set module string to filename and if options are provided, put them in
+     * after the filename, with a space separating them.
      */
+    strlcpy(efi_bi.mods[efi_bi.nr_mods].string.bytes, local_name.s,
+                 BOOTMOD_MAX_STRING);
     if ( options )
-        place_string(&mb_modules[mbi.mods_count].string, options);
-    place_string(&mb_modules[mbi.mods_count].string, local_name.s);
-    mb_modules[mbi.mods_count].mod_start = file->addr >> PAGE_SHIFT;
-    mb_modules[mbi.mods_count].mod_end = file->size;
-    ++mbi.mods_count;
+    {
+        strlcat(efi_bi.mods[efi_bi.nr_mods].string.bytes, " ",
+                BOOTMOD_MAX_STRING);
+        strlcat(efi_bi.mods[efi_bi.nr_mods].string.bytes, options,
+                BOOTMOD_MAX_STRING);
+    }
+    efi_bi.mods[efi_bi.nr_mods].string.kind = BOOTSTR_CMDLINE;
+
+    efi_bi.mods[efi_bi.nr_mods].start = file->addr;
+    efi_bi.mods[efi_bi.nr_mods].mfn = maddr_to_mfn(file->addr);
+    efi_bi.mods[efi_bi.nr_mods].size = file->size;
+
+    ++efi_bi.nr_mods;
     efi_bs->FreePool(ptr);
 }
 
