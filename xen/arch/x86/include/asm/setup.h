@@ -1,7 +1,8 @@
 #ifndef __X86_SETUP_H_
 #define __X86_SETUP_H_
 
-#include <xen/multiboot.h>
+#include <xen/bootinfo.h>
+
 #include <asm/numa.h>
 
 extern const char __2M_text_start[], __2M_text_end[];
@@ -33,20 +34,17 @@ static inline void vesa_init(void) {};
 #endif
 
 int construct_dom0(
-    struct domain *d,
-    const module_t *kernel, unsigned long kernel_headroom,
-    module_t *initrd,
-    char *cmdline);
+    struct domain *d, const struct boot_module *image,
+    struct boot_module *initrd, char *cmdline);
 void setup_io_bitmap(struct domain *d);
 
 unsigned long initial_images_nrpages(nodeid_t node);
 void discard_initial_images(void);
-void *bootstrap_map(const module_t *mod);
+void *bootstrap_map(const struct boot_module *mod);
 
 int xen_in_range(unsigned long mfn);
 
-void microcode_grab_module(
-    unsigned long *, const multiboot_info_t *);
+void microcode_grab_module(struct boot_info *bi);
 
 extern uint8_t kbd_shift_flags;
 

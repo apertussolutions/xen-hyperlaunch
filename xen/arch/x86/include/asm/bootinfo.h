@@ -24,7 +24,7 @@ struct __packed arch_boot_info {
 #define BOOTINFO_FLAG_X86_LOADERNAME 	1U << 9
 #define BOOTINFO_FLAG_X86_APM        	1U << 10
 
-    bool xen_guest;
+    bool xenguest;
 
     char *boot_loader_name;
     char *kextra;

@@ -16,8 +16,8 @@
 #define __XSM_H__
 
 #include <xen/alternative-call.h>
+#include <xen/bootinfo.h>
 #include <xen/sched.h>
-#include <xen/multiboot.h>
 
 /* policy magic number (defined by XSM_MAGIC) */
 typedef uint32_t xsm_magic_t;
@@ -776,15 +776,14 @@ static inline int xsm_argo_send(const struct domain *d, const struct domain *t)
 
 #endif /* XSM_NO_WRAPPERS */
 
-#ifdef CONFIG_MULTIBOOT
-int xsm_multiboot_init(
-    unsigned long *module_map, const multiboot_info_t *mbi);
-int xsm_multiboot_policy_init(
-    unsigned long *module_map, const multiboot_info_t *mbi,
-    void **policy_buffer, size_t *policy_size);
-#endif
+#ifndef CONFIG_HAS_DEVICE_TREE
+int xsm_bootmodule_init(const struct boot_info *bi);
+int xsm_bootmodule_policy_init(
+    const struct boot_info *bi, const unsigned char **policy_buffer,
+    size_t *policy_size);
 
-#ifdef CONFIG_HAS_DEVICE_TREE
+#else
+
 /*
  * Initialize XSM
  *
@@ -826,15 +825,14 @@ static const inline struct xsm_ops *silo_init(void)
 
 #include <xsm/dummy.h>
 
-#ifdef CONFIG_MULTIBOOT
-static inline int xsm_multiboot_init (
-    unsigned long *module_map, const multiboot_info_t *mbi)
+#ifndef CONFIG_HAS_DEVICE_TREE
+static inline int xsm_bootmodule_init(const struct boot_info *bi)
 {
     return 0;
 }
-#endif
 
-#ifdef CONFIG_HAS_DEVICE_TREE
+#else
+
 static inline int xsm_dt_init(void)
 {
     return 0;

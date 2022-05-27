@@ -4,6 +4,7 @@
  * Copyright (c) 2002-2005, K A Fraser
  */
 
+#include <xen/bootinfo.h>
 #include <xen/init.h>
 #include <xen/iocap.h>
 #include <xen/libelf.h>
@@ -574,9 +575,9 @@ int __init dom0_setup_permissions(struct domain *d)
     return rc;
 }
 
-int __init construct_dom0(struct domain *d, const module_t *image,
-                          unsigned long image_headroom, module_t *initrd,
-                          char *cmdline)
+int __init construct_dom0(
+    struct domain *d, const struct boot_module *image,
+    struct boot_module *initrd, char *cmdline)
 {
     int rc;
 
@@ -588,9 +589,9 @@ int __init construct_dom0(struct domain *d, const module_t *image,
     process_pending_softirqs();
 
     if ( is_hvm_domain(d) )
-        rc = dom0_construct_pvh(d, image, image_headroom, initrd, cmdline);
+        rc = dom0_construct_pvh(d, image, initrd, cmdline);
     else if ( is_pv_domain(d) )
-        rc = dom0_construct_pv(d, image, image_headroom, initrd, cmdline);
+        rc = dom0_construct_pv(d, image, initrd, cmdline);
     else
         panic("Cannot construct Dom0. No guest interface available\n");
 

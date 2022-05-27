@@ -1,6 +1,7 @@
 #ifndef _DOM0_BUILD_H_
 #define _DOM0_BUILD_H_
 
+#include <xen/bootinfo.h>
 #include <xen/libelf.h>
 #include <xen/sched.h>
 
@@ -13,15 +14,13 @@ unsigned long dom0_compute_nr_pages(struct domain *d,
                                     unsigned long initrd_len);
 int dom0_setup_permissions(struct domain *d);
 
-int dom0_construct_pv(struct domain *d, const module_t *image,
-                      unsigned long image_headroom,
-                      module_t *initrd,
-                      char *cmdline);
+int __init dom0_construct_pv(
+    struct domain *d, const struct boot_module *image,
+    struct boot_module *initrd, char *cmdline);
 
-int dom0_construct_pvh(struct domain *d, const module_t *image,
-                       unsigned long image_headroom,
-                       module_t *initrd,
-                       char *cmdline);
+int __init dom0_construct_pvh(
+    struct domain *d, const struct boot_module *image,
+    struct boot_module *initrd, char *cmdline);
 
 unsigned long dom0_paging_pages(const struct domain *d,
                                 unsigned long nr_pages);

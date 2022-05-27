@@ -51,4 +51,51 @@ struct __packed boot_info {
     struct arch_boot_info *arch;
 };
 
+extern struct boot_info *boot_info;
+
+static inline unsigned long bootmodule_next_idx_by_kind(
+    const struct boot_info *bi, bootmodule_kind kind, unsigned long start)
+{
+    for ( ; start < bi->nr_mods; start++ )
+        if ( bi->mods[start].kind == kind )
+            return start;
+
+    return bi->nr_mods + 1;
+}
+
+static inline unsigned long bootmodule_count_by_kind(
+    const struct boot_info *bi, bootmodule_kind kind)
+{
+    unsigned long count = 0;
+    int i;
+
+    for ( i=0; i < bi->nr_mods; i++ )
+        if ( bi->mods[i].kind == kind )
+            count++;
+
+    return count;
+}
+
+static inline struct boot_module *bootmodule_next_by_kind(
+    const struct boot_info *bi, bootmodule_kind kind, unsigned long start)
+{
+    for ( ; start < bi->nr_mods; start++ )
+        if ( bi->mods[start].kind == kind )
+            return &bi->mods[start];
+
+    return NULL;
+}
+
+static inline void bootmodule_update_start(struct boot_module *b, paddr_t new_start)
+{
+    b->start = new_start;
+    b->mfn = maddr_to_mfn(new_start);
+}
+
+static inline void bootmodule_update_mfn(struct boot_module *b, mfn_t new_mfn)
+{
+    b->mfn = new_mfn;
+    b->start = mfn_to_maddr(new_mfn);
+}
+
 #endif

@@ -18,61 +18,61 @@
  *
  */
 
-#include <xsm/xsm.h>
-#ifdef CONFIG_MULTIBOOT
-#include <xen/multiboot.h>
-#include <asm/setup.h>
-#endif
 #include <xen/bitops.h>
+#include <xen/bootinfo.h>
+#include <xsm/xsm.h>
+
 #ifdef CONFIG_HAS_DEVICE_TREE
-# include <asm/setup.h>
 # include <xen/device_tree.h>
 #endif
 
-#ifdef CONFIG_MULTIBOOT
-int __init xsm_multiboot_policy_init(
-    unsigned long *module_map, const multiboot_info_t *mbi,
-    void **policy_buffer, size_t *policy_size)
+# include <asm/setup.h>
+
+#ifndef CONFIG_HAS_DEVICE_TREE
+int __init xsm_bootmodule_policy_init(
+    const struct boot_info *bi, const unsigned char **policy_buffer,
+    size_t *policy_size)
 {
-    int i;
-    module_t *mod = (module_t *)__va(mbi->mods_addr);
-    int rc = 0;
+    unsigned long idx = 0;
+    int rc = -ENOENT;
     u32 *_policy_start;
     unsigned long _policy_len;
 
-    /*
-     * Try all modules and see whichever could be the binary policy.
-     * Adjust module_map for the module that is the binary policy.
-     */
-    for ( i = mbi->mods_count-1; i >= 1; i-- )
-    {
-        if ( !test_bit(i, module_map) )
-            continue;
+#ifdef CONFIG_XSM_FLASK_POLICY
+    /* Initially set to builtin policy, overriden if boot module is found. */
+    *policy_buffer = xsm_flask_init_policy;
+    *policy_size = xsm_flask_init_policy_size;
+    rc = 0;
+#endif
 
-        _policy_start = bootstrap_map(mod + i);
-        _policy_len   = mod[i].mod_end;
+    idx = bootmodule_next_idx_by_kind(bi, BOOTMOD_UNKNOWN, idx);
+    while ( idx < bi->nr_mods )
+    {
+        _policy_start = bootstrap_map(&bi->mods[idx]);
+        _policy_len   = bi->mods[idx].size;
 
         if ( (xsm_magic_t)(*_policy_start) == XSM_MAGIC )
         {
-            *policy_buffer = _policy_start;
+            *policy_buffer = (unsigned char *)_policy_start;
             *policy_size = _policy_len;
 
             printk("Policy len %#lx, start at %p.\n",
                    _policy_len,_policy_start);
 
-            __clear_bit(i, module_map);
+            bi->mods[idx].kind = BOOTMOD_XSM;
+            rc = 0;
             break;
-
         }
 
         bootstrap_map(NULL);
+        idx = bootmodule_next_idx_by_kind(bi, BOOTMOD_UNKNOWN, ++idx);
     }
 
     return rc;
 }
-#endif
 
-#ifdef CONFIG_HAS_DEVICE_TREE
+#else
+
 int __init xsm_dt_policy_init(void **policy_buffer, size_t *policy_size)
 {
     struct bootmodule *mod = boot_module_find_by_kind(BOOTMOD_XSM);
