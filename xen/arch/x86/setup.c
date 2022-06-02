@@ -716,34 +716,6 @@ ignore_param("edid");
  */
 ignore_param("placeholder");
 
-static bool __init loader_is_grub2(const char *loader_name)
-{
-    /* GRUB1="GNU GRUB 0.xx"; GRUB2="GRUB 1.xx" */
-    const char *p = strstr(loader_name, "GRUB ");
-    return (p != NULL) && (p[5] != '0');
-}
-
-static char * __init cmdline_cook(char *p, const char *loader_name)
-{
-    p = p ? : "";
-
-    /* Strip leading whitespace. */
-    while ( *p == ' ' )
-        p++;
-
-    /* GRUB2 and PVH don't not include image name as first item on command line. */
-    if ( xen_guest || loader_is_grub2(loader_name) )
-        return p;
-
-    /* Strip image name plus whitespace. */
-    while ( (*p != ' ') && (*p != '\0') )
-        p++;
-    while ( *p == ' ' )
-        p++;
-
-    return p;
-}
-
 static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int limit)
 {
     unsigned int n = min(bootsym(bios_e820nr), limit);
@@ -754,8 +726,7 @@ static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int li
     return n;
 }
 
-static struct domain *__init create_dom0(
-    const struct boot_info *bi, const char *kextra, const char *loader)
+static struct domain *__init create_dom0(const struct boot_info *bi)
 {
     struct xen_domctl_createdomain dom0_cfg = {
         .flags = IS_ENABLED(CONFIG_TBOOT) ? XEN_DOMCTL_CDF_s3_integrity : 0,
@@ -804,16 +775,16 @@ static struct domain *__init create_dom0(
     /* Grab the DOM0 command line. */
     cmdline = (image->string.kind == BOOTSTR_CMDLINE) ?
               image->string.bytes : NULL;
-    if ( cmdline || kextra )
+    if ( cmdline || bi->arch->kextra )
     {
         static char __initdata dom0_cmdline[MAX_GUEST_CMDLINE];
 
-        cmdline = cmdline_cook(cmdline, loader);
+        cmdline = arch_prepare_cmdline(cmdline, bi->arch);
         safe_strcpy(dom0_cmdline, cmdline);
 
-        if ( kextra )
+        if ( bi->arch->kextra )
             /* kextra always includes exactly one leading space. */
-            safe_strcat(dom0_cmdline, kextra);
+            safe_strcat(dom0_cmdline, bi->arch->kextra);
 
         /* Append any extra parameters. */
         if ( skip_ioapic_setup && !strstr(dom0_cmdline, "noapic") )
@@ -861,7 +832,7 @@ static struct domain *__init create_dom0(
 void __init noreturn __start_xen(unsigned long bi_p)
 {
     char *memmap_type = NULL;
-    char *cmdline, *kextra, *loader;
+    char *cmdline, *loader;
     void *bsp_stack;
     struct cpu_info *info = get_cpu_info(), *bsp_info;
     unsigned int initrdidx, num_parked = 0;
@@ -929,20 +900,7 @@ void __init noreturn __start_xen(unsigned long bi_p)
         ? boot_info->arch->boot_loader_name : "unknown";
 
     /* Parse the command-line options. */
-    cmdline = cmdline_cook((boot_info->arch->flags & BOOTINFO_FLAG_X86_CMDLINE) ?
-                            boot_info->cmdline : NULL,
-                           loader);
-    if ( (kextra = strstr(cmdline, " -- ")) != NULL )
-    {
-        /*
-         * Options after ' -- ' separator belong to dom0.
-         *  1. Orphan dom0's options from Xen's command line.
-         *  2. Skip all but final leading space from dom0's options.
-         */
-        *kextra = '\0';
-        kextra += 3;
-        while ( kextra[1] == ' ' ) kextra++;
-    }
+    cmdline = bootinfo_prepare_cmdline(boot_info);
     cmdline_parse(cmdline);
 
     /* Must be after command line argument parsing and before
@@ -1951,7 +1909,7 @@ void __init noreturn __start_xen(unsigned long bi_p)
      * We're going to setup domain0 using the module(s) that we stashed safely
      * above our heap. The second module, if present, is an initrd ramdisk.
      */
-    dom0 = create_dom0(boot_info, kextra, loader);
+    dom0 = create_dom0(boot_info);
     if ( !dom0 )
         panic("Could not set up DOM0 guest OS\n");
 

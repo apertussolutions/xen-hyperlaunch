@@ -53,6 +53,17 @@ struct __packed boot_info {
 
 extern struct boot_info *boot_info;
 
+static inline char *bootinfo_prepare_cmdline(struct boot_info *bi)
+{
+    bi->cmdline = arch_bootinfo_prepare_cmdline(bi->cmdline, bi->arch);
+
+    if ( *bi->cmdline == ' ' )
+        printk(XENLOG_WARNING "%s: leading whitespace left on cmdline\n",
+               __func__);
+
+    return bi->cmdline;
+}
+
 static inline unsigned long bootmodule_next_idx_by_kind(
     const struct boot_info *bi, bootmodule_kind kind, unsigned long start)
 {
