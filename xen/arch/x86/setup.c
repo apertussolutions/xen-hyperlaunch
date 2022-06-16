@@ -8,6 +8,7 @@
 #include <xen/param.h>
 #include <xen/sched.h>
 #include <xen/domain.h>
+#include <xen/domain_builder.h>
 #include <xen/serial.h>
 #include <xen/softirq.h>
 #include <xen/acpi.h>
@@ -745,109 +746,21 @@ static unsigned int __init copy_bios_e820(struct e820entry *map, unsigned int li
     return n;
 }
 
-static struct domain *__init create_dom0(
-    const struct boot_info *bi, struct boot_domain *bd)
+void __init apply_xen_cmdline(char *cmdline)
 {
-    struct xen_domctl_createdomain dom0_cfg = {
-        .flags = IS_ENABLED(CONFIG_TBOOT) ? XEN_DOMCTL_CDF_s3_integrity : 0,
-        .max_evtchn_port = -1,
-        .max_grant_frames = -1,
-        .max_maptrack_frames = -1,
-        .grant_opts = XEN_DOMCTL_GRANT_version(opt_gnttab_max_version),
-        .max_vcpus = dom0_max_vcpus(),
-        .arch = {
-            .misc_flags = opt_dom0_msr_relaxed ? XEN_X86_MSR_RELAXED : 0,
-        },
-    };
-    char *cmdline;
-
-    if ( bd->kernel == NULL )
-        panic("Error creating d%uv0\n", bd->domid);
-
-    if ( opt_dom0_pvh )
+    if ( skip_ioapic_setup && !strstr(cmdline, "noapic") )
+        strlcat(cmdline, " noapic", MAX_GUEST_CMDLINE);
+    if ( (strlen(acpi_param) == 0) && acpi_disabled )
     {
-        dom0_cfg.flags |= (XEN_DOMCTL_CDF_hvm |
-                           ((hvm_hap_supported() && !opt_dom0_shadow) ?
-                            XEN_DOMCTL_CDF_hap : 0));
-
-        dom0_cfg.arch.emulation_flags |=
-            XEN_X86_EMU_LAPIC | XEN_X86_EMU_IOAPIC | XEN_X86_EMU_VPCI;
+        printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
+        strlcpy(acpi_param, "off", sizeof(acpi_param));
     }
-
-    if ( iommu_enabled )
-        dom0_cfg.flags |= XEN_DOMCTL_CDF_iommu;
-
-    /* Create initial domain.  Not d0 for pvshim. */
-    bd->domid = get_initial_domain_id();
-    bd->domain = domain_create(bd->domid, &dom0_cfg, pv_shim ?
-                               0 : CDF_privileged);
-    if ( IS_ERR(bd->domain) )
-        panic("Error creating d%u: %ld\n", bd->domid, PTR_ERR(bd->domain));
-
-    init_dom0_cpuid_policy(bd->domain);
-
-    if ( alloc_dom0_vcpu0(bd->domain) == NULL )
-        panic("Error creating d%uv0\n", bd->domid);
-
-    /* Grab the DOM0 command line. */
-    cmdline = (bd->kernel->string.kind == BOOTSTR_CMDLINE) ?
-              bd->kernel->string.bytes : NULL;
-    if ( cmdline || bi->arch->kextra )
+    if ( (strlen(acpi_param) != 0) &&
+         !strstr(cmdline, "acpi=") )
     {
-        char dom0_cmdline[MAX_GUEST_CMDLINE];
-
-        cmdline = arch_prepare_cmdline(cmdline, bi->arch);
-        strlcpy(dom0_cmdline, cmdline, MAX_GUEST_CMDLINE);
-
-        if ( bi->arch->kextra )
-            /* kextra always includes exactly one leading space. */
-            strlcat(dom0_cmdline, bi->arch->kextra, MAX_GUEST_CMDLINE);
-
-        /* Append any extra parameters. */
-        if ( skip_ioapic_setup && !strstr(dom0_cmdline, "noapic") )
-            strlcat(dom0_cmdline, " noapic", MAX_GUEST_CMDLINE);
-        if ( (strlen(acpi_param) == 0) && acpi_disabled )
-        {
-            printk("ACPI is disabled, notifying Domain 0 (acpi=off)\n");
-            strlcpy(acpi_param, "off", sizeof(acpi_param));
-        }
-        if ( (strlen(acpi_param) != 0) && !strstr(dom0_cmdline, "acpi=") )
-        {
-            strlcat(dom0_cmdline, " acpi=", MAX_GUEST_CMDLINE);
-            strlcat(dom0_cmdline, acpi_param, MAX_GUEST_CMDLINE);
-        }
-
-        strlcpy(bd->kernel->string.bytes, dom0_cmdline, MAX_GUEST_CMDLINE);
+        strlcat(cmdline, " acpi=", MAX_GUEST_CMDLINE);
+        strlcat(cmdline, acpi_param, MAX_GUEST_CMDLINE);
     }
-
-    /*
-     * Temporarily clear SMAP in CR4 to allow user-accesses in construct_dom0().
-     * This saves a large number of corner cases interactions with
-     * copy_from_user().
-     */
-    if ( cpu_has_smap )
-    {
-        cr4_pv32_mask &= ~X86_CR4_SMAP;
-        write_cr4(read_cr4() & ~X86_CR4_SMAP);
-    }
-
-    if ( construct_domain(bd) != 0 )
-        panic("Could not construct domain 0\n");
-
-    if ( cpu_has_smap )
-    {
-        write_cr4(read_cr4() | X86_CR4_SMAP);
-        cr4_pv32_mask |= X86_CR4_SMAP;
-    }
-
-    return bd->domain;
-}
-
-void __init arch_create_dom(
-    const struct boot_info *bi, struct boot_domain *bd)
-{
-    if ( builder_is_initdom(bd) )
-        create_dom0(bi, bd);
 }
 
 /* How much of the directmap is prebuilt at compile time. */
