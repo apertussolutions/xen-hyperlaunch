@@ -1,4 +1,6 @@
+#include <xen/bootdomain.h>
 #include <xen/bootinfo.h>
+#include <xen/domain_builder.h>
 #include <xen/init.h>
 #include <xen/lib.h>
 #include <xen/err.h>
@@ -824,6 +826,13 @@ static struct domain *__init create_dom0(const struct boot_info *bi)
     }
 
     return d;
+}
+
+void __init arch_create_dom(
+    const struct boot_info *bi, struct boot_domain *bd)
+{
+    if ( builder_is_initdom(bd) )
+        create_dom0(bi);
 }
 
 /* How much of the directmap is prebuilt at compile time. */

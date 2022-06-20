@@ -51,5 +51,6 @@ static inline struct domain *builder_get_hwdom(struct boot_info *info)
 
 void builder_init(struct boot_info *info);
 uint32_t builder_create_domains(struct boot_info *info);
+void arch_create_dom(const struct boot_info *bi, struct boot_domain *bd);
 
 #endif /* XEN_DOMAIN_BUILDER_H */

@@ -72,6 +72,7 @@ extra-y := symbols-dummy.o
 obj-$(CONFIG_COVERAGE) += coverage/
 obj-y += sched/
 obj-$(CONFIG_UBSAN) += ubsan/
+obj-y += domain-builder/
 
 obj-$(CONFIG_NEEDS_LIBELF) += libelf/
 obj-$(CONFIG_CORE_DEVICE_TREE) += libfdt/

@@ -101,6 +101,22 @@ static inline struct boot_module *bootmodule_next_by_kind(
     return NULL;
 }
 
+static inline struct boot_module *bootmodule_next_by_addr(
+    const struct boot_info *bi, paddr_t addr, struct boot_module *start)
+{
+    /* point end at the entry for xen */
+    struct boot_module *end = &bi->mods[bi->nr_mods];
+
+    if ( !start )
+        start = bi->mods;
+
+    for ( ; start < end; start++ )
+        if ( start->start == addr )
+            return start;
+
+    return NULL;
+}
+
 static inline void bootmodule_update_start(struct boot_module *b, paddr_t new_start)
 {
     b->start = new_start;
