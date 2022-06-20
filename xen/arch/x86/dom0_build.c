@@ -6,6 +6,7 @@
 
 #include <xen/bootdomain.h>
 #include <xen/bootinfo.h>
+#include <xen/domain_builder.h>
 #include <xen/init.h>
 #include <xen/iocap.h>
 #include <xen/libelf.h>
@@ -556,31 +557,32 @@ int __init dom0_setup_permissions(struct domain *d)
     return rc;
 }
 
-int __init construct_dom0(
-    struct domain *d, const struct boot_module *image,
-    struct boot_module *initrd, char *cmdline)
+int __init construct_domain(struct boot_domain *bd)
 {
-    int rc;
+    int rc = 0;
 
     /* Sanity! */
-    BUG_ON(!pv_shim && d->domain_id != 0);
-    BUG_ON(d->vcpu[0] == NULL);
-    BUG_ON(d->vcpu[0]->is_initialised);
+    BUG_ON(!pv_shim && bd->domid != 0);
+    BUG_ON(bd->domain->vcpu[0] == NULL);
+    BUG_ON(bd->domain->vcpu[0]->is_initialised);
 
     process_pending_softirqs();
 
-    if ( is_hvm_domain(d) )
-        rc = dom0_construct_pvh(d, image, initrd, cmdline);
-    else if ( is_pv_domain(d) )
-        rc = dom0_construct_pv(d, image, initrd, cmdline);
-    else
-        panic("Cannot construct Dom0. No guest interface available\n");
+    if ( builder_is_initdom(bd) )
+    {
+        if ( is_hvm_domain(bd->domain) )
+            rc = dom0_construct_pvh(bd);
+        else if ( is_pv_domain(bd->domain) )
+            rc = dom0_construct_pv(bd);
+        else
+            panic("Cannot construct Dom0. No guest interface available\n");
+    }
 
     if ( rc )
         return rc;
 
     /* Sanity! */
-    BUG_ON(!d->vcpu[0]->is_initialised);
+    BUG_ON(!bd->domain->vcpu[0]->is_initialised);
 
     return 0;
 }

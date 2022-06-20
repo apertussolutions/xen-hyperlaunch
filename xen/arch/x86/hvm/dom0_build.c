@@ -19,6 +19,7 @@
  */
 
 #include <xen/acpi.h>
+#include <xen/bootdomain.h>
 #include <xen/bootinfo.h>
 #include <xen/init.h>
 #include <xen/libelf.h>
@@ -1217,10 +1218,9 @@ static void __hwdom_init pvh_setup_mmcfg(struct domain *d)
     }
 }
 
-int __init dom0_construct_pvh(
-    struct domain *d, const struct boot_module *image,
-    struct boot_module *initrd, char *cmdline)
+int __init dom0_construct_pvh(struct boot_domain *bd)
 {
+    struct domain *d = bd->domain;
     paddr_t entry, start_info;
     int rc;
 
@@ -1249,8 +1249,8 @@ int __init dom0_construct_pvh(
         return rc;
     }
 
-    rc = pvh_load_kernel(d, image, initrd, bootstrap_map(image),
-                         cmdline, &entry, &start_info);
+    rc = pvh_load_kernel(d, bd->kernel, bd->ramdisk, bootstrap_map(bd->kernel),
+                         bd->kernel->string.bytes, &entry, &start_info);
     if ( rc )
     {
         printk("Failed to load Dom0 kernel\n");
