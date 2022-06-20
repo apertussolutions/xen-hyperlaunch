@@ -14,6 +14,8 @@
  */
 
 #ifndef COMPAT
+#include <xen/bootdomain.h>
+#include <xen/domain_builder.h>
 #include <xen/init.h>
 #include <xen/lib.h>
 #include <xen/param.h>
@@ -3399,13 +3401,13 @@ void wait(void)
 }
 
 #ifdef CONFIG_X86
-void __init sched_setup_dom0_vcpus(struct domain *d)
+void __init sched_setup_dom_vcpus(struct boot_domain *bd)
 {
     unsigned int i;
     struct sched_unit *unit;
 
-    for ( i = 1; i < d->max_vcpus; i++ )
-        vcpu_create(d, i);
+    for ( i = 1; i < bd->domain->max_vcpus; i++ )
+        vcpu_create(bd->domain, i);
 
     /*
      * PV-shim: vcpus are pinned 1:1.
@@ -3413,19 +3415,24 @@ void __init sched_setup_dom0_vcpus(struct domain *d)
      * onlining them. This avoids pinning a vcpu to a not yet online cpu here.
      */
     if ( pv_shim )
-        sched_set_affinity(d->vcpu[0]->sched_unit,
+        sched_set_affinity(bd->domain->vcpu[0]->sched_unit,
                            cpumask_of(0), cpumask_of(0));
     else
     {
-        for_each_sched_unit ( d, unit )
+        for_each_sched_unit ( bd->domain, unit )
         {
-            if ( !opt_dom0_vcpus_pin && !dom0_affinity_relaxed )
-                sched_set_affinity(unit, &dom0_cpus, NULL);
-            sched_set_affinity(unit, NULL, &dom0_cpus);
+            if ( builder_is_initdom(bd) )
+            {
+                if ( !opt_dom0_vcpus_pin && !dom0_affinity_relaxed )
+                    sched_set_affinity(unit, &dom0_cpus, NULL);
+                sched_set_affinity(unit, NULL, &dom0_cpus);
+            }
+            else
+                sched_set_affinity(unit, NULL, cpupool_valid_cpus(cpupool0));
         }
     }
 
-    domain_update_node_affinity(d);
+    domain_update_node_affinity(bd->domain);
 }
 #endif
 

@@ -2,6 +2,7 @@
 #ifndef __SCHED_H__
 #define __SCHED_H__
 
+#include <xen/bootdomain.h>
 #include <xen/types.h>
 #include <xen/spinlock.h>
 #include <xen/rwlock.h>
@@ -1003,7 +1004,7 @@ static inline bool sched_has_urgent_vcpu(void)
 }
 
 void vcpu_set_periodic_timer(struct vcpu *v, s_time_t value);
-void sched_setup_dom0_vcpus(struct domain *d);
+void sched_setup_dom_vcpus(struct boot_domain *d);
 int vcpu_temporary_affinity(struct vcpu *v, unsigned int cpu, uint8_t reason);
 int vcpu_set_hard_affinity(struct vcpu *v, const cpumask_t *affinity);
 void restore_vcpu_affinity(struct domain *d);

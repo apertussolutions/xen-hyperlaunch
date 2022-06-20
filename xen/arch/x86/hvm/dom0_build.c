@@ -696,9 +696,10 @@ static int __init pvh_load_kernel(
     return 0;
 }
 
-static int __init pvh_setup_cpus(struct domain *d, paddr_t entry,
+static int __init pvh_setup_cpus(struct boot_domain *bd, paddr_t entry,
                                  paddr_t start_info)
 {
+    struct domain *d = bd->domain;
     struct vcpu *v = d->vcpu[0];
     int rc;
     /*
@@ -722,7 +723,7 @@ static int __init pvh_setup_cpus(struct domain *d, paddr_t entry,
         .cpu_regs.x86_32.tr_ar = 0x8b,
     };
 
-    sched_setup_dom0_vcpus(d);
+    sched_setup_dom_vcpus(bd);
 
     rc = arch_set_info_hvm_guest(v, &cpu_ctx);
     if ( rc )
@@ -1257,7 +1258,7 @@ int __init dom0_construct_pvh(struct boot_domain *bd)
         return rc;
     }
 
-    rc = pvh_setup_cpus(d, entry, start_info);
+    rc = pvh_setup_cpus(bd, entry, start_info);
     if ( rc )
     {
         printk("Failed to setup Dom0 CPUs: %d\n", rc);

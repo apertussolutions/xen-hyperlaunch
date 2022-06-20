@@ -28,6 +28,18 @@ static unsigned int __init dom_max_vcpus(struct boot_domain *bd)
         return bd->ncpus;
 }
 
+struct vcpu *__init alloc_dom_vcpu0(struct boot_domain *bd)
+{
+    if ( bd->functions & BUILD_FUNCTION_INITIAL_DOM )
+        return alloc_dom0_vcpu0(bd->domain);
+
+    bd->domain->node_affinity = node_online_map;
+    bd->domain->auto_node_affinity = true;
+
+    return vcpu_create(bd->domain, 0);
+}
+
+
 void __init arch_create_dom(
     const struct boot_info *bi, struct boot_domain *bd)
 {
@@ -83,7 +95,7 @@ void __init arch_create_dom(
 
     init_dom0_cpuid_policy(bd->domain);
 
-    if ( alloc_dom0_vcpu0(bd->domain) == NULL )
+    if ( alloc_dom_vcpu0(bd) == NULL )
         panic("Error creating d%uv0\n", bd->domid);
 
     /* Grab the DOM0 command line. */

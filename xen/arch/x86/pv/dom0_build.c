@@ -729,7 +729,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
 
     printk("Dom%u has maximum %u VCPUs\n", d->domain_id, d->max_vcpus);
 
-    sched_setup_dom0_vcpus(d);
+    sched_setup_dom_vcpus(bd);
 
     d->arch.paging.mode = 0;
 
