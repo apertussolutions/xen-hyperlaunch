@@ -1,6 +1,7 @@
 #include <xen/bootdomain.h>
 #include <xen/bootinfo.h>
 #include <xen/domain_builder.h>
+#include <xen/event.h>
 #include <xen/init.h>
 #include <xen/types.h>
 
@@ -60,37 +61,144 @@ void __init builder_init(struct boot_info *info)
         d->kernel->string.kind = BOOTSTR_CMDLINE;
 }
 
+static bool __init build_domain(struct boot_info *info, struct boot_domain *bd)
+{
+    if ( bd->constructed == true )
+        return true;
+
+    if ( bd->kernel == NULL )
+        return false;
+
+    printk(XENLOG_INFO "*** Building Dom%d ***\n", bd->domid);
+
+    arch_create_dom(info, bd);
+    if ( bd->domain )
+    {
+        bd->constructed = true;
+        return true;
+    }
+
+    return false;
+}
+
 uint32_t __init builder_create_domains(struct boot_info *info)
 {
     uint32_t build_count = 0, functions_built = 0;
+    struct boot_domain *bd;
     int i;
+
+    if ( IS_ENABLED(CONFIG_MULTIDOM_BUILDER) )
+    {
+        bd = builder_dom_by_function(info, BUILD_FUNCTION_XENSTORE);
+        if ( build_domain(info, bd) )
+        {
+            functions_built |= bd->functions;
+            build_count++;
+        }
+        else
+            printk(XENLOG_WARNING "Xenstore build failed, system may be unusable\n");
+
+        bd = builder_dom_by_function(info, BUILD_FUNCTION_CONSOLE);
+        if ( build_domain(info, bd) )
+        {
+            functions_built |= bd->functions;
+            build_count++;
+        }
+        else
+            printk(XENLOG_WARNING "Console build failed, system may be unusable\n");
+    }
 
     for ( i = 0; i < info->builder->nr_doms; i++ )
     {
-        struct boot_domain *d = &info->builder->domains[i];
+        bd = &info->builder->domains[i];
 
         if ( ! IS_ENABLED(CONFIG_MULTIDOM_BUILDER) &&
-             ! builder_is_initdom(d) &&
+             ! builder_is_initdom(bd) &&
              functions_built & BUILD_FUNCTION_INITIAL_DOM )
             continue;
 
-        if ( d->kernel == NULL )
+        if ( !build_domain(info, bd) )
         {
-            if ( builder_is_initdom(d) )
+            if ( builder_is_initdom(bd) )
                 panic("%s: intial domain missing kernel\n", __func__);
 
-            printk(XENLOG_ERR "%s:Dom%d definiton has no kernel\n", __func__,
-                    d->domid);
+            printk(XENLOG_WARNING "Dom%d build failed, skipping\n", bd->domid);
             continue;
         }
 
-        arch_create_dom(info, d);
-        if ( d->domain )
-        {
-            functions_built |= d->functions;
-            build_count++;
-        }
+        functions_built |= bd->functions;
+        build_count++;
     }
 
+    if ( IS_ENABLED(CONFIG_X86) )
+        /* Free temporary buffers. */
+        discard_initial_images();
+
     return build_count;
+}
+
+domid_t __init get_next_domid(void)
+{
+    static domid_t __initdata last_domid = 0;
+    domid_t next;
+
+    for ( next = last_domid + 1; next < DOMID_FIRST_RESERVED; next++ )
+    {
+        struct domain *d;
+
+        if ( (d = rcu_lock_domain_by_id(next)) == NULL )
+        {
+            last_domid = next;
+            return next;
+        }
+
+        rcu_unlock_domain(d);
+    }
+
+    return 0;
+}
+
+int __init alloc_system_evtchn(
+    const struct boot_info *info, struct boot_domain *bd)
+{
+    evtchn_alloc_unbound_t evtchn_req;
+    struct boot_domain *c = builder_dom_by_function(info,
+                                                    BUILD_FUNCTION_CONSOLE);
+    struct boot_domain *s = builder_dom_by_function(info,
+                                                    BUILD_FUNCTION_XENSTORE);
+    int rc;
+
+    evtchn_req.dom = bd->domid;
+
+    if ( c != NULL && c != bd && c->constructed )
+    {
+        evtchn_req.remote_dom = c->domid;
+
+        rc = evtchn_alloc_unbound(&evtchn_req);
+        if ( rc )
+        {
+            printk("Failed allocating console event channel for domain %d\n",
+                   bd->domid);
+            return rc;
+        }
+
+        bd->console.evtchn = evtchn_req.port;
+    }
+
+    if ( s != NULL && s != bd && s->constructed )
+    {
+        evtchn_req.remote_dom = s->domid;
+
+        rc = evtchn_alloc_unbound(&evtchn_req);
+        if ( rc )
+        {
+            printk("Failed allocating xenstore event channel for domain %d\n",
+                   bd->domid);
+            return rc;
+        }
+
+        bd->store.evtchn = evtchn_req.port;
+    }
+
+    return 0;
 }

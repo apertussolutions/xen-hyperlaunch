@@ -524,37 +524,6 @@ int __init dom0_setup_permissions(struct domain *d)
 
     return rc;
 }
-
-int __init construct_domain(struct boot_domain *bd)
-{
-    int rc = 0;
-
-    /* Sanity! */
-    BUG_ON(!pv_shim && bd->domid != 0);
-    BUG_ON(bd->domain->vcpu[0] == NULL);
-    BUG_ON(bd->domain->vcpu[0]->is_initialised);
-
-    process_pending_softirqs();
-
-    if ( builder_is_initdom(bd) )
-    {
-        if ( is_hvm_domain(bd->domain) )
-            rc = dom0_construct_pvh(bd);
-        else if ( is_pv_domain(bd->domain) )
-            rc = dom0_construct_pv(bd);
-        else
-            panic("Cannot construct Dom0. No guest interface available\n");
-    }
-
-    if ( rc )
-        return rc;
-
-    /* Sanity! */
-    BUG_ON(!bd->domain->vcpu[0]->is_initialised);
-
-    return 0;
-}
-
 /*
  * Local variables:
  * mode: C

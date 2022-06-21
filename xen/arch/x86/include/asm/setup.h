@@ -36,6 +36,8 @@ static inline void vesa_init(void) {};
 void apply_xen_cmdline(char *cmdline);
 int construct_domain(struct boot_domain *bd);
 
+int dom_construct_pv(struct boot_domain *bd);
+
 void setup_io_bitmap(struct domain *d);
 
 unsigned long initial_images_nrpages(nodeid_t node);

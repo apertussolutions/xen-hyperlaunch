@@ -1,5 +1,5 @@
 /******************************************************************************
- * pv/dom0_build.c
+ * pv/domain_builder.c
  *
  * Copyright (c) 2002-2005, K A Fraser
  */
@@ -8,6 +8,7 @@
 #include <xen/bootinfo.h>
 #include <xen/console.h>
 #include <xen/domain.h>
+#include <xen/domain_builder.h>
 #include <xen/domain_page.h>
 #include <xen/init.h>
 #include <xen/libelf.h>
@@ -296,7 +297,7 @@ static struct page_info * __init alloc_chunk(struct domain *d,
     return page;
 }
 
-int __init dom0_construct_pv(struct boot_domain *bd)
+int __init dom_construct_pv(struct boot_domain *bd)
 {
     int i, rc, order, machine;
     bool compatible, compat;
@@ -350,7 +351,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     /* Machine address of next candidate page-table page. */
     paddr_t mpt_alloc;
 
-    printk(XENLOG_INFO "*** Building a PV Dom%d ***\n", d->domain_id);
+    printk(XENLOG_INFO "*** Constructing a PV Dom%d ***\n", d->domain_id);
 
     d->max_pages = ~0U;
 
@@ -362,7 +363,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     if ( (rc = elf_init(&elf, image_start, image_len)) != 0 )
         return rc;
 
-    if ( opt_dom0_verbose )
+    if ( builder_is_ctldom(bd) && opt_dom0_verbose )
         elf_set_verbose(&elf);
 
     elf_parse_binary(&elf);
@@ -384,7 +385,8 @@ int __init dom0_construct_pv(struct boot_domain *bd)
         {
             if ( unlikely(rc = switch_compat(d)) )
             {
-                printk("Dom0 failed to switch to compat: %d\n", rc);
+                printk("Dom%d failed to switch to compat: %d\n",
+                        d->domain_id, rc);
                 return rc;
             }
 
@@ -404,22 +406,23 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     if ( elf_msb(&elf) )
         compatible = false;
 
-    printk(" Dom0 kernel: %s-bit%s, %s, paddr %#" PRIx64 " -> %#" PRIx64 "\n",
-           elf_64bit(&elf) ? "64" : elf_32bit(&elf) ? "32" : "??",
+    printk(" Dom%d kernel: %s-bit%s, %s, paddr %#" PRIx64 " -> %#" PRIx64 "\n",
+           d->domain_id, elf_64bit(&elf) ? "64" : elf_32bit(&elf) ? "32" : "??",
            parms.pae       ? ", PAE" : "",
            elf_msb(&elf)   ? "msb"   : "lsb",
            elf.pstart, elf.pend);
     if ( elf.bsd_symtab_pstart )
-        printk(" Dom0 symbol map %#" PRIx64 " -> %#" PRIx64 "\n",
-               elf.bsd_symtab_pstart, elf.bsd_symtab_pend);
+        printk(" Dom%d symbol map %#" PRIx64 " -> %#" PRIx64 "\n",
+               d->domain_id, elf.bsd_symtab_pstart, elf.bsd_symtab_pend);
 
     if ( !compatible )
     {
-        printk("Mismatch between Xen and DOM0 kernel\n");
+        printk("Mismatch between Xen and DOM%d kernel\n", d->domain_id);
         return -EINVAL;
     }
 
-    if ( parms.elf_notes[XEN_ELFNOTE_SUPPORTED_FEATURES].type != XEN_ENT_NONE )
+    if ( builder_is_initdom(bd) &&
+         parms.elf_notes[XEN_ELFNOTE_SUPPORTED_FEATURES].type != XEN_ENT_NONE )
     {
         if ( !pv_shim && !test_bit(XENFEAT_dom0, parms.f_supported) )
         {
@@ -443,7 +446,8 @@ int __init dom0_construct_pv(struct boot_domain *bd)
 
             if ( value > __HYPERVISOR_COMPAT_VIRT_START )
             {
-                printk("Dom0 expects too high a hypervisor start address\n");
+                printk("Dom%d expects too high a hypervisor start address\n",
+                       d->domain_id);
                 return -ERANGE;
             }
             HYPERVISOR_COMPAT_VIRT_START(d) =
@@ -487,7 +491,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     vstartinfo_start = round_pgup(vphysmap_end);
     vstartinfo_end   = vstartinfo_start + sizeof(struct start_info);
 
-    if ( pv_shim )
+    if ( pv_shim || ! builder_is_initdom(bd) )
     {
         vxenstore_start  = round_pgup(vstartinfo_end);
         vxenstore_end    = vxenstore_start + PAGE_SIZE;
@@ -578,8 +582,8 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     }
 
     printk("PHYSICAL MEMORY ARRANGEMENT:\n"
-           " Dom0 alloc.:   %"PRIpaddr"->%"PRIpaddr,
-           pfn_to_paddr(alloc_spfn), pfn_to_paddr(alloc_epfn));
+           " Dom%d alloc.:   %"PRIpaddr"->%"PRIpaddr,
+           d->domain_id, pfn_to_paddr(alloc_spfn), pfn_to_paddr(alloc_epfn));
     if ( domain_tot_pages(d) < nr_pages )
         printk(" (%lu pages to be allocated)",
                nr_pages - domain_tot_pages(d));
@@ -596,7 +600,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
         printk(" Init. ramdisk: %p->%p\n", _p(vinitrd_start), _p(vinitrd_end));
     printk(" Phys-Mach map: %p->%p\n", _p(vphysmap_start), _p(vphysmap_end));
     printk(" Start info:    %p->%p\n", _p(vstartinfo_start), _p(vstartinfo_end));
-    if ( pv_shim )
+    if ( pv_shim || ! builder_is_initdom(bd) )
     {
         printk(" Xenstore ring: %p->%p\n", _p(vxenstore_start), _p(vxenstore_end));
         printk(" Console ring:  %p->%p\n", _p(vconsole_start), _p(vconsole_end));
@@ -617,7 +621,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
          ? v_end > HYPERVISOR_COMPAT_VIRT_START(d)
          : (v_start < HYPERVISOR_VIRT_END) && (v_end > HYPERVISOR_VIRT_START) )
     {
-        printk("DOM0 image overlaps with Xen private area.\n");
+        printk("DOM%d image overlaps with Xen private area.\n", d->domain_id);
         return -EINVAL;
     }
 
@@ -768,9 +772,6 @@ int __init dom0_construct_pv(struct boot_domain *bd)
         init_hypercall_page(d, _p(parms.virt_hypercall));
     }
 
-    /* Free temporary buffers. */
-    discard_initial_images();
-
     /* Set up start info area. */
     si = (start_info_t *)vstartinfo_start;
     clear_page(si);
@@ -778,7 +779,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
 
     si->shared_info = virt_to_maddr(d->shared_info);
 
-    if ( !pv_shim )
+    if ( !pv_shim && builder_is_ctldom(bd) )
         si->flags    = SIF_PRIVILEGED | SIF_INITDOMAIN;
     if ( !vinitrd_start && initrd_len )
         si->flags   |= SIF_MOD_START_PFN;
@@ -788,6 +789,19 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     si->mfn_list     = vphysmap_start;
     snprintf(si->magic, sizeof(si->magic), "xen-3.0-x86_%d%s",
              elf_64bit(&elf) ? 64 : 32, parms.pae ? "p" : "");
+
+    if ( !builder_is_initdom(bd) )
+    {
+        si->store_mfn = ((vxenstore_start - v_start) >> PAGE_SHIFT)
+                        + alloc_spfn;
+        bd->store.mfn = si->store_mfn;
+        si->store_evtchn = bd->store.evtchn;
+
+        si->console.domU.mfn = ((vconsole_start - v_start) >> PAGE_SHIFT)
+                               + alloc_spfn;
+        bd->console.mfn = si->console.domU.mfn;
+        si->console.domU.evtchn = bd->console.evtchn;
+    }
 
     count = domain_tot_pages(d);
 
@@ -871,23 +885,24 @@ int __init dom0_construct_pv(struct boot_domain *bd)
                 sizeof(si->cmd_line));
 
 #ifdef CONFIG_VIDEO
-    if ( !pv_shim && fill_console_start_info((void *)(si + 1)) )
-    {
-        si->console.dom0.info_off  = sizeof(struct start_info);
-        si->console.dom0.info_size = sizeof(struct dom0_vga_console_info);
-    }
+    if ( builder_is_hwdom(bd) )
+        if ( !pv_shim && fill_console_start_info((void *)(si + 1)) )
+        {
+            si->console.dom0.info_off  = sizeof(struct start_info);
+            si->console.dom0.info_size = sizeof(struct dom0_vga_console_info);
+        }
 #endif
 
     /*
      * TODO: provide an empty stub for fill_console_start_info in the
      * !CONFIG_VIDEO case so the logic here can be simplified.
      */
-    if ( pv_shim )
+    if ( builder_is_hwdom(bd) && pv_shim )
         pv_shim_setup_dom(d, l4start, v_start, vxenstore_start, vconsole_start,
                           vphysmap_start, si);
 
 #ifdef CONFIG_COMPAT
-    if ( compat )
+    if ( builder_is_hwdom(bd) && compat )
         xlat_start_info(si, pv_shim ? XLAT_start_info_console_domU
                                     : XLAT_start_info_console_dom0);
 #endif
@@ -926,15 +941,18 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     if ( test_bit(XENFEAT_supervisor_mode_kernel, parms.f_required) )
         panic("Dom0 requires supervisor-mode execution\n");
 
-    rc = dom0_setup_permissions(d);
-    BUG_ON(rc != 0);
+    if ( builder_is_hwdom(bd) )
+    {
+        rc = dom0_setup_permissions(d);
+        BUG_ON(rc != 0);
+    }
 
     if ( d->domain_id == hardware_domid )
         iommu_hwdom_init(d);
 
 #ifdef CONFIG_SHADOW_PAGING
     /* Fill the shadow pool if necessary. */
-    if ( opt_dom0_shadow || opt_pv_l1tf_hwdom )
+    if ( builder_is_hwdom(bd) && (opt_dom0_shadow || opt_pv_l1tf_hwdom) )
     {
         bool preempted;
 
@@ -948,7 +966,7 @@ int __init dom0_construct_pv(struct boot_domain *bd)
     }
 
     /* Activate shadow mode, if requested.  Reuse the pv_l1tf tasklet. */
-    if ( opt_dom0_shadow )
+    if ( builder_is_hwdom(bd) && opt_dom0_shadow )
     {
         printk("Switching dom0 to using shadow paging\n");
         tasklet_schedule(&d->arch.paging.shadow.pv_l1tf_tasklet);
@@ -960,8 +978,8 @@ int __init dom0_construct_pv(struct boot_domain *bd)
 
 out:
     if ( elf_check_broken(&elf) )
-        printk(XENLOG_WARNING "Dom0 kernel broken ELF: %s\n",
-               elf_check_broken(&elf));
+        printk(XENLOG_WARNING "Dom%d kernel broken ELF: %s\n",
+               d->domain_id, elf_check_broken(&elf));
 
     return rc;
 }

@@ -12,4 +12,14 @@ config BUILDER_FDT
 
 	  If unsure, say N.
 
+config MULTIDOM_BUILDER
+	bool "Multidomain building (UNSUPPORTED)" if UNSUPPORTED
+	depends on BUILDER_FDT
+	---help---
+	  Enables the domain builder to construct multiple domains.
+
+	  This feature is currently experimental.
+
+	  If unsure, say N.
+
 endmenu

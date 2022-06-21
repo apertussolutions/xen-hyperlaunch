@@ -34,6 +34,22 @@ static inline bool builder_is_hwdom(struct boot_domain *bd)
             bd->permissions & BUILD_PERMISSION_HARDWARE );
 }
 
+static inline struct boot_domain *builder_dom_by_function(
+    const struct boot_info *info, uint32_t func)
+{
+    int i;
+
+    for ( i = 0; i < info->builder->nr_doms; i++ )
+    {
+        struct boot_domain *bd = &info->builder->domains[i];
+
+        if ( bd->functions & func )
+            return bd;
+    }
+
+    return NULL;
+}
+
 static inline struct domain *builder_get_hwdom(struct boot_info *info)
 {
     int i;
@@ -51,6 +67,9 @@ static inline struct domain *builder_get_hwdom(struct boot_info *info)
 
 void builder_init(struct boot_info *info);
 uint32_t builder_create_domains(struct boot_info *info);
+domid_t get_next_domid(void);
+int alloc_system_evtchn(
+    const struct boot_info *info, struct boot_domain *bd);
 void arch_create_dom(const struct boot_info *bi, struct boot_domain *bd);
 
 #endif /* XEN_DOMAIN_BUILDER_H */

@@ -15,5 +15,5 @@ obj-$(CONFIG_PV_SHIM) += shim.o
 obj-$(CONFIG_TRACEBUFFER) += trace.o
 obj-y += traps.o
 
-obj-bin-y += dom0_build.init.o
+obj-bin-y += domain_builder.init.o
 obj-bin-y += gpr_switch.o

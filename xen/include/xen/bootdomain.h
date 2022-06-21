@@ -47,6 +47,12 @@ struct boot_domain {
     struct boot_module *configs[BUILD_MAX_CONF_MODS];
 
     struct domain *domain;
+    struct {
+        xen_pfn_t mfn;
+        unsigned int evtchn;
+    } store, console;
+    bool constructed;
+
 };
 
 #endif
