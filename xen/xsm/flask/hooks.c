@@ -182,7 +182,15 @@ static int cf_check flask_domain_alloc_security(struct domain *d)
         dsec->sid = SECINITSID_DOMIO;
         break;
     default:
-        dsec->sid = SECINITSID_UNLABELED;
+        if ( domain_sid(current->domain) == SECINITSID_XENBOOT )
+        {
+            if ( d->is_privileged )
+                dsec->sid = SECINITSID_DOM0;
+            else
+                dsec->sid = SECINITSID_DOMU;
+        }
+        else
+            dsec->sid = SECINITSID_UNLABELED;
     }
 
     dsec->self_sid = dsec->sid;
@@ -548,23 +556,21 @@ static int cf_check flask_domain_create(struct domain *d, uint32_t ssidref)
 {
     int rc;
     struct domain_security_struct *dsec = d->ssid;
-    static int dom0_created = 0;
 
-    if ( is_idle_domain(current->domain) && !dom0_created )
+    /*
+     * If domain has not already been labeled or a valid new label is provided,
+     * then use the provided label, otherwise use the existing label.
+     */
+    if ( dsec->sid == SECINITSID_UNLABELED || ssidref > 0 )
     {
-        dsec->sid = SECINITSID_DOM0;
-        dom0_created = 1;
-    }
-    else
-    {
-        rc = avc_current_has_perm(ssidref, SECCLASS_DOMAIN,
-                          DOMAIN__CREATE, NULL);
-        if ( rc )
-            return rc;
-
         dsec->sid = ssidref;
+        dsec->self_sid = dsec->sid;
     }
-    dsec->self_sid = dsec->sid;
+
+    rc = avc_current_has_perm(dsec->sid, SECCLASS_DOMAIN,
+                              DOMAIN__CREATE, NULL);
+    if ( rc )
+        return rc;
 
     rc = security_transition_sid(dsec->sid, dsec->sid, SECCLASS_DOMAIN,
                                  &dsec->self_sid);
